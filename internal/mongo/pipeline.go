@@ -91,6 +91,19 @@ func applyPipelineWithLookup(docs []bson.M, pipeline []bson.M, resolve lookupRes
 			if err != nil {
 				return nil, err
 			}
+		case stage["$graphLookup"] != nil:
+			if resolve == nil {
+				return nil, fmt.Errorf("$graphLookup requires resolver")
+			}
+			spec, ok := coerceBsonM(stage["$graphLookup"])
+			if !ok {
+				return nil, fmt.Errorf("$graphLookup stage must be a document")
+			}
+			var err error
+			out, err = applyGraphLookup(out, spec, resolve)
+			if err != nil {
+				return nil, err
+			}
 		case stage["$unwind"] != nil:
 			path, preserve, err := parseUnwindStage(stage["$unwind"])
 			if err != nil {
@@ -143,6 +156,26 @@ func applyPipelineWithLookup(docs []bson.M, pipeline []bson.M, resolve lookupRes
 				return nil, err
 			}
 			out = applySample(out, size)
+		case stage["$facet"] != nil:
+			spec, ok := coerceBsonM(stage["$facet"])
+			if !ok {
+				return nil, fmt.Errorf("$facet stage must be a document")
+			}
+			var err error
+			out, err = applyFacet(out, spec, resolve)
+			if err != nil {
+				return nil, err
+			}
+		case stage["$setWindowFields"] != nil:
+			spec, ok := coerceBsonM(stage["$setWindowFields"])
+			if !ok {
+				return nil, fmt.Errorf("$setWindowFields stage must be a document")
+			}
+			var err error
+			out, err = applySetWindowFields(out, spec)
+			if err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("unsupported aggregation stage: %v", stage)
 		}
@@ -150,6 +183,321 @@ func applyPipelineWithLookup(docs []bson.M, pipeline []bson.M, resolve lookupRes
 	for _, d := range out {
 		delete(d, mogVectorSearchScoreKey)
 	}
+	return out, nil
+}
+
+func applyFacet(docs []bson.M, spec bson.M, resolve lookupResolver) ([]bson.M, error) {
+	out := bson.M{}
+	for facetName, rawPipeline := range spec {
+		arr, ok := coerceInterfaceSlice(rawPipeline)
+		if !ok {
+			return nil, fmt.Errorf("$facet %q pipeline must be an array", facetName)
+		}
+		pipeline := make([]bson.M, 0, len(arr))
+		for _, rawStage := range arr {
+			stageDoc, ok := coerceBsonM(rawStage)
+			if !ok {
+				return nil, fmt.Errorf("$facet %q stage must be a document", facetName)
+			}
+			pipeline = append(pipeline, stageDoc)
+		}
+		facetOut, err := applyPipelineWithLookup(cloneDocsShallow(docs), pipeline, resolve)
+		if err != nil {
+			return nil, err
+		}
+		out[facetName] = facetOut
+	}
+	return []bson.M{out}, nil
+}
+
+func applyGraphLookup(docs []bson.M, spec bson.M, resolve lookupResolver) ([]bson.M, error) {
+	from, _ := spec["from"].(string)
+	as, _ := spec["as"].(string)
+	connectFromField, _ := spec["connectFromField"].(string)
+	connectToField, _ := spec["connectToField"].(string)
+	startWith := spec["startWith"]
+
+	if from == "" || as == "" || connectFromField == "" || connectToField == "" {
+		return nil, fmt.Errorf("$graphLookup requires from/as/connectFromField/connectToField")
+	}
+	if startWith == nil {
+		return nil, fmt.Errorf("$graphLookup requires startWith")
+	}
+
+	maxDepth := 0
+	if v, ok := spec["maxDepth"]; ok && v != nil {
+		if n, err := asInt(v); err == nil && n >= 0 {
+			maxDepth = n
+		}
+	}
+
+	foreign, err := resolve(from)
+	if err != nil {
+		return nil, err
+	}
+
+	out := make([]bson.M, 0, len(docs))
+	for _, d := range docs {
+		nd := bson.M{}
+		for k, v := range d {
+			nd[k] = v
+		}
+
+		startVal, err := evalValue(d, startWith)
+		if err != nil {
+			return nil, err
+		}
+		starts := []interface{}{}
+		if arr, ok := coerceInterfaceSlice(startVal); ok {
+			starts = append(starts, arr...)
+		} else {
+			starts = append(starts, startVal)
+		}
+
+		type node struct {
+			val   interface{}
+			depth int
+		}
+		q := make([]node, 0, len(starts))
+		seen := map[string]struct{}{}
+		for _, s := range starts {
+			k := fmt.Sprintf("%T:%v", s, s)
+			if _, ok := seen[k]; ok {
+				continue
+			}
+			seen[k] = struct{}{}
+			q = append(q, node{val: s, depth: 0})
+		}
+
+		results := make([]bson.M, 0)
+		for len(q) > 0 {
+			cur := q[0]
+			q = q[1:]
+			if cur.depth > maxDepth {
+				continue
+			}
+
+			// Find matching foreign docs where connectToField == cur.val
+			for _, fd := range foreign {
+				toVal := getPathValue(fd, connectToField)
+				if fmt.Sprint(toVal) != fmt.Sprint(cur.val) {
+					continue
+				}
+				results = append(results, fd)
+
+				// Expand using connectFromField.
+				next := getPathValue(fd, connectFromField)
+				nextVals := []interface{}{}
+				if arr, ok := coerceInterfaceSlice(next); ok {
+					nextVals = append(nextVals, arr...)
+				} else {
+					nextVals = append(nextVals, next)
+				}
+				for _, nv := range nextVals {
+					if nv == nil {
+						continue
+					}
+					k := fmt.Sprintf("%T:%v", nv, nv)
+					if _, ok := seen[k]; ok {
+						continue
+					}
+					seen[k] = struct{}{}
+					q = append(q, node{val: nv, depth: cur.depth + 1})
+				}
+			}
+		}
+
+		nd[as] = results
+		out = append(out, nd)
+	}
+	return out, nil
+}
+
+func cloneDocsShallow(docs []bson.M) []bson.M {
+	out := make([]bson.M, 0, len(docs))
+	for _, d := range docs {
+		nd := bson.M{}
+		for k, v := range d {
+			nd[k] = v
+		}
+		out = append(out, nd)
+	}
+	return out
+}
+
+func applySetWindowFields(docs []bson.M, spec bson.M) ([]bson.M, error) {
+	// This is intentionally a minimal, compatibility-focused implementation.
+	// Supported (common) subset:
+	// - partitionBy: field reference (e.g. "$age") or omitted
+	// - sortBy: single field with 1/-1
+	// - output:
+	//   - $avg: "$field" with window documents ["unbounded","current"] (or omitted => treated the same)
+	//   - $rank: {}
+
+	var partitionBy interface{} = nil
+	if v, ok := spec["partitionBy"]; ok {
+		partitionBy = v
+	}
+
+	sortBy, ok := coerceBsonM(spec["sortBy"])
+	if !ok || len(sortBy) == 0 {
+		return nil, fmt.Errorf("$setWindowFields requires sortBy")
+	}
+	var sortField string
+	sortDir := 1
+	for k, v := range sortBy {
+		sortField = k
+		if dir, err := asInt(v); err == nil && dir != 0 {
+			sortDir = dir
+		}
+		break
+	}
+	if sortField == "" {
+		return nil, fmt.Errorf("$setWindowFields requires a non-empty sortBy field")
+	}
+
+	outputSpec, ok := coerceBsonM(spec["output"])
+	if !ok || len(outputSpec) == 0 {
+		return nil, fmt.Errorf("$setWindowFields requires output")
+	}
+
+	type outOp struct {
+		outField string
+		kind     string // "avg" or "rank"
+		arg      interface{}
+	}
+	ops := make([]outOp, 0, len(outputSpec))
+	for outField, raw := range outputSpec {
+		m, ok := coerceBsonM(raw)
+		if !ok {
+			return nil, fmt.Errorf("$setWindowFields output %q must be a document", outField)
+		}
+		if avgArg, ok := m["$avg"]; ok {
+			// Best-effort validate window shape if provided.
+			if w, ok := coerceBsonM(m["window"]); ok {
+				if docsSpec, ok := w["documents"]; ok {
+					if arr, ok := coerceInterfaceSlice(docsSpec); ok && len(arr) == 2 {
+						// accept "unbounded"/"current" (case-insensitive) only
+						a := strings.ToLower(fmt.Sprint(arr[0]))
+						b := strings.ToLower(fmt.Sprint(arr[1]))
+						if a != "unbounded" || b != "current" {
+							return nil, fmt.Errorf("$setWindowFields only supports window documents [unbounded,current]")
+						}
+					} else {
+						return nil, fmt.Errorf("$setWindowFields window.documents must be [unbounded,current]")
+					}
+				}
+			}
+			ops = append(ops, outOp{outField: outField, kind: "avg", arg: avgArg})
+			continue
+		}
+		if _, ok := m["$rank"]; ok {
+			ops = append(ops, outOp{outField: outField, kind: "rank"})
+			continue
+		}
+		return nil, fmt.Errorf("unsupported $setWindowFields output operator: %v", m)
+	}
+
+	// Output retains input order; we compute window results by sorting indices per partition.
+	out := cloneDocsShallow(docs)
+
+	partitions := map[string][]int{}
+	for i, d := range docs {
+		var key interface{} = nil
+		if partitionBy != nil {
+			v, err := evalValue(d, partitionBy)
+			if err != nil {
+				return nil, err
+			}
+			key = v
+		}
+		k := fmt.Sprintf("%T:%v", key, key)
+		partitions[k] = append(partitions[k], i)
+	}
+
+	for _, idxs := range partitions {
+		// Sort partition indices by sortBy.
+		sort.SliceStable(idxs, func(i, j int) bool {
+			a := docs[idxs[i]]
+			b := docs[idxs[j]]
+			av := getPathValue(a, sortField)
+			bv := getPathValue(b, sortField)
+			if af, ok := toFloat64(av); ok {
+				if bf, ok := toFloat64(bv); ok {
+					if af == bf {
+						return false
+					}
+					if sortDir < 0 {
+						return af > bf
+					}
+					return af < bf
+				}
+			}
+			as := fmt.Sprint(av)
+			bs := fmt.Sprint(bv)
+			if as == bs {
+				return false
+			}
+			if sortDir < 0 {
+				return as > bs
+			}
+			return as < bs
+		})
+
+		// Pre-compute ranks for this partition if needed.
+		needRank := false
+		for _, op := range ops {
+			if op.kind == "rank" {
+				needRank = true
+				break
+			}
+		}
+
+		ranks := map[int]int64{}
+		if needRank {
+			var prev interface{} = nil
+			var havePrev bool
+			var rank int64
+			for pos, idx := range idxs {
+				cur := getPathValue(docs[idx], sortField)
+				if !havePrev || fmt.Sprint(cur) != fmt.Sprint(prev) {
+					rank = int64(pos + 1)
+					prev = cur
+					havePrev = true
+				}
+				ranks[idx] = rank
+			}
+		}
+
+		// Compute per-op window outputs in sorted order.
+		for _, op := range ops {
+			switch op.kind {
+			case "rank":
+				for _, idx := range idxs {
+					out[idx][op.outField] = ranks[idx]
+				}
+			case "avg":
+				sum := 0.0
+				n := int64(0)
+				for _, idx := range idxs {
+					val, err := evalValue(docs[idx], op.arg)
+					if err != nil {
+						return nil, err
+					}
+					if f, ok := toFloat64(val); ok {
+						sum += f
+						n++
+					}
+					if n == 0 {
+						out[idx][op.outField] = nil
+					} else {
+						out[idx][op.outField] = sum / float64(n)
+					}
+				}
+			}
+		}
+	}
+
 	return out, nil
 }
 
@@ -913,7 +1261,7 @@ func applyProject(docs []bson.M, proj bson.M) ([]bson.M, error) {
 			}
 		}
 		for k, expr := range computed {
-			val, err := evalExpr(d, expr)
+			val, err := evalComputedWithOpts(d, expr, evalOpts{sizeNonArrayZero: true})
 			if err != nil {
 				return nil, err
 			}
@@ -953,87 +1301,7 @@ func applyAddFields(docs []bson.M, spec bson.M) ([]bson.M, error) {
 }
 
 func evalAddFieldsValue(doc bson.M, expr interface{}) (interface{}, error) {
-	// Field reference: "$field.subfield"
-	if s, ok := expr.(string); ok {
-		if len(s) > 1 && s[0] == '$' {
-			return getPathValue(doc, strings.TrimPrefix(s, "$")), nil
-		}
-		return s, nil
-	}
-
-	// Operator expression (for now): { "$size": <expr> }
-	if m, ok := coerceBsonM(expr); ok {
-		// Treat a single-key document whose key starts with "$" as an operator expression.
-		if len(m) == 1 {
-			for op, arg := range m {
-				if strings.HasPrefix(op, "$") {
-					switch op {
-					case "$cond":
-						// Form 1: { $cond: [ <if>, <then>, <else> ] }
-						if arr, ok := arg.([]interface{}); ok {
-							if len(arr) != 3 {
-								return nil, fmt.Errorf("$cond must be a 3-arg array")
-							}
-							condVal, err := evalAddFieldsValue(doc, arr[0])
-							if err != nil {
-								return nil, err
-							}
-							if isTruthy(condVal) {
-								return evalAddFieldsValue(doc, arr[1])
-							}
-							return evalAddFieldsValue(doc, arr[2])
-						}
-
-						// Form 2: { $cond: { if: <expr>, then: <expr>, else: <expr> } }
-						if spec, ok := coerceBsonM(arg); ok {
-							ifExpr, hasIf := spec["if"]
-							thenExpr, hasThen := spec["then"]
-							elseExpr, hasElse := spec["else"]
-							if !hasIf || !hasThen || !hasElse {
-								return nil, fmt.Errorf("$cond object form requires if/then/else")
-							}
-							condVal, err := evalAddFieldsValue(doc, ifExpr)
-							if err != nil {
-								return nil, err
-							}
-							if isTruthy(condVal) {
-								return evalAddFieldsValue(doc, thenExpr)
-							}
-							return evalAddFieldsValue(doc, elseExpr)
-						}
-
-						return nil, fmt.Errorf("$cond must be an array or document")
-					case "$isArray":
-						v, err := evalAddFieldsValue(doc, arg)
-						if err != nil {
-							return nil, err
-						}
-						return isArrayValue(v), nil
-					case "$size":
-						v, err := evalAddFieldsValue(doc, arg)
-						if err != nil {
-							return nil, err
-						}
-						if v == nil {
-							return nil, nil
-						}
-						rv := reflect.ValueOf(v)
-						if rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array {
-							return int64(rv.Len()), nil
-						}
-						return nil, nil
-					default:
-						return nil, fmt.Errorf("unsupported $addFields expression: %v", m)
-					}
-				}
-			}
-		}
-		// Literal document (constant).
-		return m, nil
-	}
-
-	// Constant (number/bool/null/array/etc).
-	return expr, nil
+	return evalComputedWithOpts(doc, expr, evalOpts{sizeNonArrayZero: false})
 }
 
 func isArrayValue(v interface{}) bool {
@@ -1092,74 +1360,914 @@ func isTruthy(v interface{}) bool {
 	}
 }
 
-func evalExpr(doc bson.M, expr bson.M) (interface{}, error) {
-	if metaArg, ok := expr["$meta"]; ok {
-		if s, ok := metaArg.(string); ok {
-			switch s {
-			case "vectorSearchScore":
-				if doc == nil {
-					return nil, nil
-				}
-				return doc[mogVectorSearchScoreKey], nil
-			default:
-				return nil, fmt.Errorf("unsupported $meta: %s", s)
-			}
-		}
-		return nil, fmt.Errorf("$meta must be a string")
-	}
-	if sizeArg, ok := expr["$size"]; ok {
-		val, err := evalValue(doc, sizeArg)
-		if err != nil {
-			return nil, err
-		}
-		if val == nil {
-			return int64(0), nil
-		}
-
-		rv := reflect.ValueOf(val)
-		if rv.IsValid() && (rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array) {
-			// Don't treat raw bytes as an array for $size.
-			if rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
-				return int64(0), nil
-			}
-			return int64(rv.Len()), nil
-		}
-		// Safe mode: non-array => 0.
-		return int64(0), nil
-	}
-	if mul, ok := expr["$multiply"]; ok {
-		args, ok := mul.([]interface{})
-		if !ok || len(args) != 2 {
-			return nil, fmt.Errorf("$multiply must be a 2-arg array")
-		}
-
-		a, err := evalValue(doc, args[0])
-		if err != nil {
-			return nil, err
-		}
-		b, err := evalValue(doc, args[1])
-		if err != nil {
-			return nil, err
-		}
-		af, ok := toFloat64(a)
-		if !ok {
-			return nil, fmt.Errorf("$multiply arg is not numeric: %v", a)
-		}
-		bf, ok := toFloat64(b)
-		if !ok {
-			return nil, fmt.Errorf("$multiply arg is not numeric: %v", b)
-		}
-		return af * bf, nil
-	}
-	return nil, fmt.Errorf("unsupported computed expression: %v", expr)
-}
-
 func evalValue(doc bson.M, v interface{}) (interface{}, error) {
 	if s, ok := v.(string); ok && len(s) > 1 && s[0] == '$' {
 		f := s[1:]
 		return getPathValue(doc, f), nil
 	}
 	return v, nil
+}
+
+type evalOpts struct {
+	sizeNonArrayZero bool
+}
+
+func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interface{}, error) {
+	// Field reference: "$field.subfield"
+	if s, ok := expr.(string); ok {
+		if len(s) > 1 && s[0] == '$' {
+			return getPathValue(doc, strings.TrimPrefix(s, "$")), nil
+		}
+		return s, nil
+	}
+
+	// Operator expression.
+	if m, ok := coerceBsonM(expr); ok {
+		if len(m) == 1 && docHasOperatorKeys(m) {
+			for op, arg := range m {
+				switch op {
+				// Misc
+				case "$literal":
+					return arg, nil
+				case "$meta":
+					if s, ok := arg.(string); ok {
+						switch s {
+						case "vectorSearchScore":
+							if doc == nil {
+								return nil, nil
+							}
+							return doc[mogVectorSearchScoreKey], nil
+						default:
+							return nil, fmt.Errorf("unsupported $meta: %s", s)
+						}
+					}
+					return nil, fmt.Errorf("$meta must be a string")
+
+				// Boolean
+				case "$and":
+					args, err := evalArrayArgs(doc, arg, 1, opts)
+					if err != nil {
+						return nil, err
+					}
+					for _, a := range args {
+						if !isTruthy(a) {
+							return false, nil
+						}
+					}
+					return true, nil
+				case "$or":
+					args, err := evalArrayArgs(doc, arg, 1, opts)
+					if err != nil {
+						return nil, err
+					}
+					for _, a := range args {
+						if isTruthy(a) {
+							return true, nil
+						}
+					}
+					return false, nil
+				case "$not":
+					// Mongo uses array form, but accept scalar too.
+					if arr, ok := coerceInterfaceSlice(arg); ok {
+						if len(arr) != 1 {
+							return nil, fmt.Errorf("$not must be a 1-arg array")
+						}
+						v, err := evalComputedWithOpts(doc, arr[0], opts)
+						if err != nil {
+							return nil, err
+						}
+						return !isTruthy(v), nil
+					}
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					return !isTruthy(v), nil
+
+				// Conditional
+				case "$cond":
+					// Form 1: { $cond: [ <if>, <then>, <else> ] }
+					if arr, ok := coerceInterfaceSlice(arg); ok {
+						if len(arr) != 3 {
+							return nil, fmt.Errorf("$cond must be a 3-arg array")
+						}
+						condVal, err := evalComputedWithOpts(doc, arr[0], opts)
+						if err != nil {
+							return nil, err
+						}
+						if isTruthy(condVal) {
+							return evalComputedWithOpts(doc, arr[1], opts)
+						}
+						return evalComputedWithOpts(doc, arr[2], opts)
+					}
+					// Form 2: { $cond: { if: <expr>, then: <expr>, else: <expr> } }
+					if spec, ok := coerceBsonM(arg); ok {
+						ifExpr, hasIf := spec["if"]
+						thenExpr, hasThen := spec["then"]
+						elseExpr, hasElse := spec["else"]
+						if !hasIf || !hasThen || !hasElse {
+							return nil, fmt.Errorf("$cond object form requires if/then/else")
+						}
+						condVal, err := evalComputedWithOpts(doc, ifExpr, opts)
+						if err != nil {
+							return nil, err
+						}
+						if isTruthy(condVal) {
+							return evalComputedWithOpts(doc, thenExpr, opts)
+						}
+						return evalComputedWithOpts(doc, elseExpr, opts)
+					}
+					return nil, fmt.Errorf("$cond must be an array or document")
+				case "$ifNull":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					if args[0] == nil {
+						return args[1], nil
+					}
+					return args[0], nil
+				case "$switch":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$switch must be a document")
+					}
+					rawBranches, ok := spec["branches"]
+					if !ok {
+						return nil, fmt.Errorf("$switch requires branches")
+					}
+					branchesArr, ok := coerceInterfaceSlice(rawBranches)
+					if !ok {
+						return nil, fmt.Errorf("$switch branches must be an array")
+					}
+					for _, br := range branchesArr {
+						brDoc, ok := coerceBsonM(br)
+						if !ok {
+							return nil, fmt.Errorf("$switch branch must be a document")
+						}
+						caseExpr, okC := brDoc["case"]
+						thenExpr, okT := brDoc["then"]
+						if !okC || !okT {
+							return nil, fmt.Errorf("$switch branch requires case/then")
+						}
+						cv, err := evalComputedWithOpts(doc, caseExpr, opts)
+						if err != nil {
+							return nil, err
+						}
+						if isTruthy(cv) {
+							return evalComputedWithOpts(doc, thenExpr, opts)
+						}
+					}
+					if def, ok := spec["default"]; ok {
+						return evalComputedWithOpts(doc, def, opts)
+					}
+					return nil, nil
+
+				// Comparison
+				case "$cmp":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					return int64(cmp3(args[0], args[1])), nil
+				case "$eq":
+					return evalCompareOp(doc, arg, func(c int) bool { return c == 0 }, opts)
+				case "$ne":
+					return evalCompareOp(doc, arg, func(c int) bool { return c != 0 }, opts)
+				case "$gt":
+					return evalCompareOp(doc, arg, func(c int) bool { return c > 0 }, opts)
+				case "$gte":
+					return evalCompareOp(doc, arg, func(c int) bool { return c >= 0 }, opts)
+				case "$lt":
+					return evalCompareOp(doc, arg, func(c int) bool { return c < 0 }, opts)
+				case "$lte":
+					return evalCompareOp(doc, arg, func(c int) bool { return c <= 0 }, opts)
+
+				// Array
+				case "$isArray":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					return isArrayValue(v), nil
+				case "$size":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					if v == nil {
+						if opts.sizeNonArrayZero {
+							return int64(0), nil
+						}
+						return nil, nil
+					}
+					rv := reflect.ValueOf(v)
+					if rv.IsValid() && (rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array) {
+						if rv.Kind() == reflect.Slice && rv.Type().Elem().Kind() == reflect.Uint8 {
+							if opts.sizeNonArrayZero {
+								return int64(0), nil
+							}
+							return nil, nil
+						}
+						return int64(rv.Len()), nil
+					}
+					if opts.sizeNonArrayZero {
+						return int64(0), nil
+					}
+					return nil, nil
+				case "$in":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					list, ok := coerceInterfaceSlice(args[1])
+					if !ok {
+						return false, nil
+					}
+					if arr, ok := coerceInterfaceSlice(args[0]); ok {
+						return anyIn(arr, list), nil
+					}
+					return scalarIn(args[0], list), nil
+				case "$arrayElemAt":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					arr, ok := coerceInterfaceSlice(args[0])
+					if !ok {
+						return nil, nil
+					}
+					idx64, ok := toInt64IfIntegral(args[1])
+					if !ok {
+						return nil, nil
+					}
+					idx := int(idx64)
+					if idx < 0 {
+						idx = len(arr) + idx
+					}
+					if idx < 0 || idx >= len(arr) {
+						return nil, nil
+					}
+					return arr[idx], nil
+				case "$concatArrays":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					out := make([]interface{}, 0)
+					for _, a := range args {
+						arr, ok := coerceInterfaceSlice(a)
+						if !ok {
+							return nil, nil
+						}
+						out = append(out, arr...)
+					}
+					return out, nil
+				case "$first":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					arr, ok := coerceInterfaceSlice(v)
+					if !ok || len(arr) == 0 {
+						return nil, nil
+					}
+					return arr[0], nil
+				case "$last":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					arr, ok := coerceInterfaceSlice(v)
+					if !ok || len(arr) == 0 {
+						return nil, nil
+					}
+					return arr[len(arr)-1], nil
+				case "$slice":
+					arr, ok := coerceInterfaceSlice(arg)
+					if !ok || (len(arr) != 2 && len(arr) != 3) {
+						return nil, fmt.Errorf("$slice must be a 2-arg or 3-arg array")
+					}
+					e0, err := evalComputedWithOpts(doc, arr[0], opts)
+					if err != nil {
+						return nil, err
+					}
+					list, ok := coerceInterfaceSlice(e0)
+					if !ok {
+						return nil, nil
+					}
+					if len(arr) == 2 {
+						n64, ok := toInt64IfIntegralMust(evalComputedWithOpts(doc, arr[1], opts))
+						if !ok {
+							return nil, nil
+						}
+						n := int(n64)
+						if n >= 0 {
+							if n > len(list) {
+								n = len(list)
+							}
+							return list[:n], nil
+						}
+						// negative => last n elements
+						n = -n
+						if n > len(list) {
+							n = len(list)
+						}
+						return list[len(list)-n:], nil
+					}
+					pos64, ok := toInt64IfIntegralMust(evalComputedWithOpts(doc, arr[1], opts))
+					if !ok {
+						return nil, nil
+					}
+					n64, ok := toInt64IfIntegralMust(evalComputedWithOpts(doc, arr[2], opts))
+					if !ok {
+						return nil, nil
+					}
+					pos := int(pos64)
+					n := int(n64)
+					if pos < 0 {
+						pos = len(list) + pos
+					}
+					if pos < 0 {
+						pos = 0
+					}
+					if pos > len(list) {
+						pos = len(list)
+					}
+					end := pos + n
+					if end > len(list) {
+						end = len(list)
+					}
+					if end < pos {
+						end = pos
+					}
+					return list[pos:end], nil
+				case "$reverseArray":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					arr, ok := coerceInterfaceSlice(v)
+					if !ok {
+						return nil, nil
+					}
+					out := make([]interface{}, len(arr))
+					for i := range arr {
+						out[i] = arr[len(arr)-1-i]
+					}
+					return out, nil
+				case "$range":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					start, ok := toInt64IfIntegral(args[0])
+					if !ok {
+						return nil, nil
+					}
+					end, ok := toInt64IfIntegral(args[1])
+					if !ok {
+						return nil, nil
+					}
+					step := int64(1)
+					if len(args) >= 3 {
+						if s, ok := toInt64IfIntegral(args[2]); ok && s != 0 {
+							step = s
+						}
+					}
+					out := []interface{}{}
+					if step > 0 {
+						for i := start; i < end; i += step {
+							out = append(out, i)
+						}
+					} else {
+						for i := start; i > end; i += step {
+							out = append(out, i)
+						}
+					}
+					return out, nil
+
+				// Arithmetic
+				case "$add":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					sum := 0.0
+					for _, a := range args {
+						if a == nil {
+							return nil, nil
+						}
+						f, ok := toFloat64(a)
+						if !ok {
+							return nil, nil
+						}
+						sum += f
+					}
+					return sum, nil
+				case "$subtract":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					a, ok := toFloat64(args[0])
+					if !ok || args[0] == nil || args[1] == nil {
+						return nil, nil
+					}
+					b, ok := toFloat64(args[1])
+					if !ok {
+						return nil, nil
+					}
+					return a - b, nil
+				case "$multiply":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					prod := 1.0
+					for _, a := range args {
+						if a == nil {
+							return nil, nil
+						}
+						f, ok := toFloat64(a)
+						if !ok {
+							return nil, nil
+						}
+						prod *= f
+					}
+					return prod, nil
+				case "$divide":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					a, ok := toFloat64(args[0])
+					if !ok || args[0] == nil || args[1] == nil {
+						return nil, nil
+					}
+					b, ok := toFloat64(args[1])
+					if !ok || b == 0 {
+						return nil, nil
+					}
+					return a / b, nil
+				case "$mod":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					a, ok := toFloat64(args[0])
+					if !ok || args[0] == nil || args[1] == nil {
+						return nil, nil
+					}
+					b, ok := toFloat64(args[1])
+					if !ok || b == 0 {
+						return nil, nil
+					}
+					return math.Mod(a, b), nil
+				case "$abs":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					f, ok := toFloat64(v)
+					if !ok || v == nil {
+						return nil, nil
+					}
+					return math.Abs(f), nil
+				case "$ceil":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					f, ok := toFloat64(v)
+					if !ok || v == nil {
+						return nil, nil
+					}
+					return math.Ceil(f), nil
+				case "$floor":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					f, ok := toFloat64(v)
+					if !ok || v == nil {
+						return nil, nil
+					}
+					return math.Floor(f), nil
+				case "$sqrt":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					f, ok := toFloat64(v)
+					if !ok || v == nil || f < 0 {
+						return nil, nil
+					}
+					return math.Sqrt(f), nil
+				case "$pow":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					a, ok := toFloat64(args[0])
+					if !ok || args[0] == nil || args[1] == nil {
+						return nil, nil
+					}
+					b, ok := toFloat64(args[1])
+					if !ok {
+						return nil, nil
+					}
+					return math.Pow(a, b), nil
+				case "$round":
+					args, err := evalArrayArgs(doc, arg, 1, opts)
+					if err != nil {
+						return nil, err
+					}
+					f, ok := toFloat64(args[0])
+					if !ok || args[0] == nil {
+						return nil, nil
+					}
+					place := int64(0)
+					if len(args) >= 2 {
+						if p, ok := toInt64IfIntegral(args[1]); ok {
+							place = p
+						}
+					}
+					scale := math.Pow10(int(place))
+					return math.Round(f*scale) / scale, nil
+				case "$trunc":
+					args, err := evalArrayArgs(doc, arg, 1, opts)
+					if err != nil {
+						return nil, err
+					}
+					f, ok := toFloat64(args[0])
+					if !ok || args[0] == nil {
+						return nil, nil
+					}
+					place := int64(0)
+					if len(args) >= 2 {
+						if p, ok := toInt64IfIntegral(args[1]); ok {
+							place = p
+						}
+					}
+					scale := math.Pow10(int(place))
+					return math.Trunc(f*scale) / scale, nil
+				case "$exp":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					f, ok := toFloat64(v)
+					if !ok || v == nil {
+						return nil, nil
+					}
+					return math.Exp(f), nil
+				case "$ln":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					f, ok := toFloat64(v)
+					if !ok || v == nil || f <= 0 {
+						return nil, nil
+					}
+					return math.Log(f), nil
+				case "$log10":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					f, ok := toFloat64(v)
+					if !ok || v == nil || f <= 0 {
+						return nil, nil
+					}
+					return math.Log10(f), nil
+				case "$log":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					a, ok := toFloat64(args[0])
+					if !ok || args[0] == nil || args[1] == nil || a <= 0 {
+						return nil, nil
+					}
+					base, ok := toFloat64(args[1])
+					if !ok || base <= 0 || base == 1 {
+						return nil, nil
+					}
+					return math.Log(a) / math.Log(base), nil
+
+				// String
+				case "$concat":
+					args, err := evalArrayArgs(doc, arg, 1, opts)
+					if err != nil {
+						return nil, err
+					}
+					var b strings.Builder
+					for _, a := range args {
+						if a == nil {
+							return nil, nil
+						}
+						b.WriteString(fmt.Sprint(a))
+					}
+					return b.String(), nil
+				case "$toLower":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					if v == nil {
+						return nil, nil
+					}
+					return strings.ToLower(fmt.Sprint(v)), nil
+				case "$toUpper":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					if v == nil {
+						return nil, nil
+					}
+					return strings.ToUpper(fmt.Sprint(v)), nil
+				case "$split":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					if args[0] == nil || args[1] == nil {
+						return nil, nil
+					}
+					s := fmt.Sprint(args[0])
+					sep := fmt.Sprint(args[1])
+					parts := strings.Split(s, sep)
+					out := make([]interface{}, 0, len(parts))
+					for _, p := range parts {
+						out = append(out, p)
+					}
+					return out, nil
+				case "$replaceOne", "$replaceAll":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("%s must be a document", op)
+					}
+					inRaw, okI := spec["input"]
+					findRaw, okF := spec["find"]
+					repRaw, okR := spec["replacement"]
+					if !okI || !okF || !okR {
+						return nil, fmt.Errorf("%s requires input/find/replacement", op)
+					}
+					in, err := evalComputedWithOpts(doc, inRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					find, err := evalComputedWithOpts(doc, findRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					rep, err := evalComputedWithOpts(doc, repRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					if in == nil || find == nil || rep == nil {
+						return nil, nil
+					}
+					s := fmt.Sprint(in)
+					f := fmt.Sprint(find)
+					r := fmt.Sprint(rep)
+					if f == "" {
+						return s, nil
+					}
+					if op == "$replaceOne" {
+						return strings.Replace(s, f, r, 1), nil
+					}
+					return strings.ReplaceAll(s, f, r), nil
+				case "$strLenBytes":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					if v == nil {
+						return nil, nil
+					}
+					return int64(len([]byte(fmt.Sprint(v)))), nil
+				case "$trim", "$ltrim", "$rtrim":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("%s must be a document", op)
+					}
+					inRaw, okI := spec["input"]
+					if !okI {
+						return nil, fmt.Errorf("%s requires input", op)
+					}
+					in, err := evalComputedWithOpts(doc, inRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					if in == nil {
+						return nil, nil
+					}
+					s := fmt.Sprint(in)
+					chars := ""
+					if rawChars, ok := spec["chars"]; ok {
+						cv, err := evalComputedWithOpts(doc, rawChars, opts)
+						if err != nil {
+							return nil, err
+						}
+						if cv != nil {
+							chars = fmt.Sprint(cv)
+						}
+					}
+					switch op {
+					case "$trim":
+						if chars == "" {
+							return strings.TrimSpace(s), nil
+						}
+						return strings.Trim(s, chars), nil
+					case "$ltrim":
+						if chars == "" {
+							return strings.TrimLeftFunc(s, func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\r' }), nil
+						}
+						return strings.TrimLeft(s, chars), nil
+					default:
+						if chars == "" {
+							return strings.TrimRightFunc(s, func(r rune) bool { return r == ' ' || r == '\t' || r == '\n' || r == '\r' }), nil
+						}
+						return strings.TrimRight(s, chars), nil
+					}
+
+				// Date
+				case "$toDate":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					tm, ok := coerceTime(v)
+					if !ok {
+						return nil, nil
+					}
+					return tm, nil
+				case "$year":
+					return datePart(doc, arg, func(t time.Time) int64 { return int64(t.Year()) }, opts)
+				case "$month":
+					return datePart(doc, arg, func(t time.Time) int64 { return int64(t.Month()) }, opts)
+				case "$dayOfMonth":
+					return datePart(doc, arg, func(t time.Time) int64 { return int64(t.Day()) }, opts)
+				case "$dayOfYear":
+					return datePart(doc, arg, func(t time.Time) int64 { return int64(t.YearDay()) }, opts)
+				case "$hour":
+					return datePart(doc, arg, func(t time.Time) int64 { return int64(t.Hour()) }, opts)
+				case "$minute":
+					return datePart(doc, arg, func(t time.Time) int64 { return int64(t.Minute()) }, opts)
+				case "$second":
+					return datePart(doc, arg, func(t time.Time) int64 { return int64(t.Second()) }, opts)
+				case "$millisecond":
+					return datePart(doc, arg, func(t time.Time) int64 { return int64(t.Nanosecond() / 1_000_000) }, opts)
+				case "$dayOfWeek":
+					return datePart(doc, arg, func(t time.Time) int64 { return int64(t.Weekday()) + 1 }, opts)
+				case "$week":
+					return datePart(doc, arg, func(t time.Time) int64 { return int64(mongoWeek(t)) }, opts)
+
+				default:
+					return nil, fmt.Errorf("unsupported computed expression: %v", m)
+				}
+			}
+		}
+
+		// Literal document (constant).
+		return m, nil
+	}
+
+	// Constant (number/bool/null/array/etc).
+	return expr, nil
+}
+
+func evalArrayArgs(doc bson.M, raw interface{}, min int, opts evalOpts) ([]interface{}, error) {
+	arr, ok := coerceInterfaceSlice(raw)
+	if !ok || len(arr) < min {
+		return nil, fmt.Errorf("expression requires an array with at least %d args", min)
+	}
+	out := make([]interface{}, 0, len(arr))
+	for _, it := range arr {
+		v, err := evalComputedWithOpts(doc, it, opts)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, v)
+	}
+	return out, nil
+}
+
+func evalCompareOp(doc bson.M, raw interface{}, pred func(int) bool, opts evalOpts) (bool, error) {
+	args, err := evalArrayArgs(doc, raw, 2, opts)
+	if err != nil {
+		return false, err
+	}
+	return pred(cmp3(args[0], args[1])), nil
+}
+
+func cmp3(a, b interface{}) int {
+	if af, ok := toFloat64(a); ok {
+		if bf, ok := toFloat64(b); ok {
+			if af < bf {
+				return -1
+			}
+			if af > bf {
+				return 1
+			}
+			return 0
+		}
+	}
+	as := fmt.Sprint(a)
+	bs := fmt.Sprint(b)
+	if as < bs {
+		return -1
+	}
+	if as > bs {
+		return 1
+	}
+	return 0
+}
+
+func toInt64IfIntegralMust(v interface{}, err error) (int64, bool) {
+	if err != nil {
+		return 0, false
+	}
+	return toInt64IfIntegral(v)
+}
+
+func datePart(doc bson.M, raw interface{}, fn func(time.Time) int64, opts evalOpts) (interface{}, error) {
+	v, err := evalComputedWithOpts(doc, raw, opts)
+	if err != nil {
+		return nil, err
+	}
+	tm, ok := coerceTime(v)
+	if !ok {
+		return nil, nil
+	}
+	return fn(tm.UTC()), nil
+}
+
+func mongoWeek(t time.Time) int {
+	t = t.UTC()
+	year := t.Year()
+	jan1 := time.Date(year, 1, 1, 0, 0, 0, 0, time.UTC)
+	// Go: Sunday=0 ... Saturday=6
+	offset := (7 - int(jan1.Weekday())) % 7
+	firstSunday := jan1.AddDate(0, 0, offset)
+	if t.Before(firstSunday) {
+		return 0
+	}
+	days := int(t.Sub(firstSunday).Hours() / 24)
+	return 1 + (days / 7)
+}
+
+func coerceTime(v interface{}) (time.Time, bool) {
+	if v == nil {
+		return time.Time{}, false
+	}
+	switch t := v.(type) {
+	case time.Time:
+		return t, true
+	case *time.Time:
+		if t == nil {
+			return time.Time{}, false
+		}
+		return *t, true
+	case bson.MongoTimestamp:
+		// High 32 bits are seconds since epoch.
+		sec := int64(uint64(t) >> 32)
+		return time.Unix(sec, 0).UTC(), true
+	case int64:
+		// Heuristic: treat large values as milliseconds since epoch.
+		if t > 1_000_000_000_000 {
+			return time.UnixMilli(t).UTC(), true
+		}
+		return time.Unix(t, 0).UTC(), true
+	case int32:
+		return time.Unix(int64(t), 0).UTC(), true
+	case int:
+		return time.Unix(int64(t), 0).UTC(), true
+	case float64:
+		sec := int64(t)
+		return time.Unix(sec, 0).UTC(), true
+	case string:
+		s := strings.TrimSpace(t)
+		if s == "" {
+			return time.Time{}, false
+		}
+		if tm, err := time.Parse(time.RFC3339Nano, s); err == nil {
+			return tm, true
+		}
+		if tm, err := time.Parse(time.RFC3339, s); err == nil {
+			return tm, true
+		}
+		if tm, err := time.Parse("2006-01-02", s); err == nil {
+			return tm, true
+		}
+		return time.Time{}, false
+	default:
+		return time.Time{}, false
+	}
 }
 
 type groupState struct {
@@ -1170,6 +2278,10 @@ type groupState struct {
 	sumOnlyInt     map[string]int64
 	sumOnlyIsFloat map[string]bool
 	sumInt         map[string]int64
+	max            map[string]interface{}
+	min            map[string]interface{}
+	maxSet         map[string]bool
+	minSet         map[string]bool
 	addToSetKeys   map[string]map[string]struct{}
 	addToSetVals   map[string][]interface{}
 }
@@ -1211,6 +2323,10 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				sumOnlyInt:     map[string]int64{},
 				sumOnlyIsFloat: map[string]bool{},
 				sumInt:         map[string]int64{},
+				max:            map[string]interface{}{},
+				min:            map[string]interface{}{},
+				maxSet:         map[string]bool{},
+				minSet:         map[string]bool{},
 				addToSetKeys:   map[string]map[string]struct{}{},
 				addToSetVals:   map[string][]interface{}{},
 			}
@@ -1275,6 +2391,34 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				}
 				continue
 			}
+			if maxArg, ok := acc["$max"]; ok {
+				val, err := evalValue(d, maxArg)
+				if err != nil {
+					return nil, err
+				}
+				if val == nil {
+					continue
+				}
+				if !st.maxSet[outField] || lessValue(st.max[outField], val) {
+					st.max[outField] = deepClone(val)
+					st.maxSet[outField] = true
+				}
+				continue
+			}
+			if minArg, ok := acc["$min"]; ok {
+				val, err := evalValue(d, minArg)
+				if err != nil {
+					return nil, err
+				}
+				if val == nil {
+					continue
+				}
+				if !st.minSet[outField] || lessValue(val, st.min[outField]) {
+					st.min[outField] = deepClone(val)
+					st.minSet[outField] = true
+				}
+				continue
+			}
 			return nil, fmt.Errorf("unsupported $group accumulator: %v", acc)
 		}
 	}
@@ -1302,6 +2446,14 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				} else {
 					doc[outField] = vals
 				}
+				continue
+			}
+			if st.maxSet[outField] {
+				doc[outField] = st.max[outField]
+				continue
+			}
+			if st.minSet[outField] {
+				doc[outField] = st.min[outField]
 				continue
 			}
 			if st.sumOnlyIsFloat[outField] {
@@ -1433,6 +2585,15 @@ func cmpNumber(a, b interface{}, fn func(float64, float64) bool) bool {
 		return false
 	}
 	return fn(af, bf)
+}
+
+func lessValue(a, b interface{}) bool {
+	if af, ok := toFloat64(a); ok {
+		if bf, ok := toFloat64(b); ok {
+			return af < bf
+		}
+	}
+	return fmt.Sprint(a) < fmt.Sprint(b)
 }
 
 func toInt64IfIntegral(v interface{}) (int64, bool) {
