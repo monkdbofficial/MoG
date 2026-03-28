@@ -3,6 +3,7 @@ package mongo
 import (
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 	"time"
 
@@ -922,5 +923,249 @@ func TestApplyPipeline_Project_ArithmeticStringBoolArrayDate(t *testing.T) {
 	}
 	if got["year"] != int64(2026) || got["mon"] != int64(3) || got["dom"] != int64(28) {
 		t.Fatalf("date parts: year=%#v mon=%#v dom=%#v", got["year"], got["mon"], got["dom"])
+	}
+}
+
+func TestApplyPipeline_Project_Phase2_MapFilterReduceSortZipRegexSubstrDate(t *testing.T) {
+	docs := []bson.M{
+		{
+			"_id":  1,
+			"nums": []interface{}{int64(1), int64(2), int64(3)},
+			"arr":  []interface{}{int64(3), int64(1), int64(2)},
+			"s":    "Äbc",
+			"ds":   "2026-03-28T10:11:12Z",
+		},
+	}
+
+	pipeline := []bson.M{
+		{"$project": bson.M{
+			"_id": 1,
+			"mapInc": bson.M{"$map": bson.M{
+				"input": "$nums",
+				"as":    "n",
+				"in":    bson.M{"$add": []interface{}{"$$n", 1}},
+			}},
+			"filterGt1": bson.M{"$filter": bson.M{
+				"input": "$nums",
+				"as":    "n",
+				"cond":  bson.M{"$gt": []interface{}{"$$n", 1}},
+			}},
+			"reduceSum": bson.M{"$reduce": bson.M{
+				"input":        "$nums",
+				"initialValue": 0,
+				"in":           bson.M{"$add": []interface{}{"$$value", "$$this"}},
+			}},
+			"sorted": bson.M{"$sortArray": bson.M{"input": "$arr", "sortBy": 1}},
+			"zipped": bson.M{"$zip": bson.M{"inputs": []interface{}{"$nums", "$arr"}}},
+			"rx":     bson.M{"$regexMatch": bson.M{"input": "hello", "regex": "^he"}},
+			"subcp":  bson.M{"$substrCP": []interface{}{"$s", 0, 2}},
+			"lencp":  bson.M{"$strLenCP": "$s"},
+			"idxb":   bson.M{"$indexOfBytes": []interface{}{"abcabc", "ca"}},
+			"idxcp":  bson.M{"$indexOfCP": []interface{}{"$s", "b"}},
+			"dt":     bson.M{"$dateFromString": bson.M{"dateString": "$ds"}},
+			"dstr":   bson.M{"$dateToString": bson.M{"date": bson.M{"$dateFromString": bson.M{"dateString": "$ds"}}, "format": "%Y-%m-%d"}},
+			"dadd": bson.M{"$dateToString": bson.M{
+				"date":   bson.M{"$dateAdd": bson.M{"startDate": bson.M{"$dateFromString": bson.M{"dateString": "$ds"}}, "unit": "day", "amount": 1}},
+				"format": "%Y-%m-%d",
+			}},
+			"dtrHr": bson.M{"$hour": bson.M{"$dateTrunc": bson.M{"date": bson.M{"$dateFromString": bson.M{"dateString": "$ds"}}, "unit": "hour"}}},
+		}},
+	}
+
+	out, err := applyPipeline(docs, pipeline)
+	if err != nil {
+		t.Fatalf("applyPipeline err: %v", err)
+	}
+	got := out[0]
+
+	if inc, ok := got["mapInc"].([]interface{}); !ok || len(inc) != 3 || inc[0] != 2.0 || inc[1] != 3.0 || inc[2] != 4.0 {
+		t.Fatalf("mapInc: %#v", got["mapInc"])
+	}
+	if f, ok := got["filterGt1"].([]interface{}); !ok || len(f) != 2 || fmt.Sprint(f[0]) != "2" || fmt.Sprint(f[1]) != "3" {
+		t.Fatalf("filterGt1: %#v", got["filterGt1"])
+	}
+	if got["reduceSum"] != 6.0 {
+		t.Fatalf("reduceSum: %#v", got["reduceSum"])
+	}
+	if s, ok := got["sorted"].([]interface{}); !ok || len(s) != 3 || fmt.Sprint(s[0]) != "1" || fmt.Sprint(s[1]) != "2" || fmt.Sprint(s[2]) != "3" {
+		t.Fatalf("sorted: %#v", got["sorted"])
+	}
+	if got["rx"] != true {
+		t.Fatalf("regexMatch: %#v", got["rx"])
+	}
+	if got["subcp"] != "Äb" || got["lencp"] != int64(3) {
+		t.Fatalf("substr/len: subcp=%#v lencp=%#v", got["subcp"], got["lencp"])
+	}
+	if got["idxb"] != int64(2) || got["idxcp"] != int64(1) {
+		t.Fatalf("indexOf: idxb=%#v idxcp=%#v", got["idxb"], got["idxcp"])
+	}
+	if got["dstr"] != "2026-03-28" || got["dadd"] != "2026-03-29" {
+		t.Fatalf("date strings: dstr=%#v dadd=%#v", got["dstr"], got["dadd"])
+	}
+	if got["dtrHr"] != int64(10) {
+		t.Fatalf("dateTrunc hour: %#v", got["dtrHr"])
+	}
+	if _, ok := got["dt"].(time.Time); !ok {
+		t.Fatalf("dateFromString: %#v", got["dt"])
+	}
+}
+
+func TestApplyPipeline_SetWindowFields_DenseRank_DocNum_Shift(t *testing.T) {
+	docs := []bson.M{
+		{"_id": 1, "age": 30, "salary": 10.0},
+		{"_id": 2, "age": 30, "salary": 20.0},
+		{"_id": 3, "age": 30, "salary": 20.0},
+	}
+	pipeline := []bson.M{{
+		"$setWindowFields": bson.M{
+			"partitionBy": "$age",
+			"sortBy":      bson.M{"salary": 1},
+			"output": bson.M{
+				"dense": bson.M{"$denseRank": bson.M{}},
+				"num":   bson.M{"$documentNumber": bson.M{}},
+				"prev":  bson.M{"$shift": bson.M{"output": "$salary", "by": -1, "default": nil}},
+			},
+		},
+	}}
+	out, err := applyPipeline(docs, pipeline)
+	if err != nil {
+		t.Fatalf("applyPipeline err: %v", err)
+	}
+	byID := map[interface{}]bson.M{}
+	for _, d := range out {
+		byID[d["_id"]] = d
+	}
+	// Sorted salaries: 10,20,20 => dense ranks 1,2,2; doc numbers 1,2,3; prev of first is nil.
+	if byID[1]["dense"] != int64(1) || byID[2]["dense"] != int64(2) || byID[3]["dense"] != int64(2) {
+		t.Fatalf("dense: %#v %#v %#v", byID[1]["dense"], byID[2]["dense"], byID[3]["dense"])
+	}
+	if byID[1]["num"] != int64(1) || byID[2]["num"] != int64(2) || byID[3]["num"] != int64(3) {
+		t.Fatalf("num: %#v %#v %#v", byID[1]["num"], byID[2]["num"], byID[3]["num"])
+	}
+	if byID[1]["prev"] != nil || byID[2]["prev"] != 10.0 || byID[3]["prev"] != 20.0 {
+		t.Fatalf("prev: %#v %#v %#v", byID[1]["prev"], byID[2]["prev"], byID[3]["prev"])
+	}
+}
+
+func TestApplyPipeline_Project_Phase3_ObjectConvertRegexFindDatePartsIsoIndexOfArray(t *testing.T) {
+	docs := []bson.M{
+		{
+			"_id":     1,
+			"obj":     bson.M{"a": 1, "b": 2},
+			"arr":     []interface{}{"x", "y", "z"},
+			"msg":     "Hello hello",
+			"created": "2026-03-28T10:11:12Z",
+		},
+	}
+
+	pipeline := []bson.M{
+		{"$project": bson.M{
+			"_id":    1,
+			"getA":   bson.M{"$getField": bson.M{"field": "a", "input": "$obj"}},
+			"setC":   bson.M{"$setField": bson.M{"field": "c", "input": "$obj", "value": 3}},
+			"unsetB": bson.M{"$unsetField": bson.M{"field": "b", "input": "$obj"}},
+			"merge":  bson.M{"$mergeObjects": []interface{}{"$obj", bson.M{"b": 10, "d": 4}}},
+			"o2a":    bson.M{"$objectToArray": "$obj"},
+			"a2o": bson.M{"$arrayToObject": []interface{}{
+				bson.M{"k": "x", "v": 1},
+				[]interface{}{"y", 2},
+			}},
+			"idxArr":     bson.M{"$indexOfArray": []interface{}{"$arr", "y"}},
+			"strcasecmp": bson.M{"$strcasecmp": []interface{}{"AbC", "aBc"}},
+
+			"rxFind":    bson.M{"$regexFind": bson.M{"input": "$msg", "regex": "hello", "options": "i"}},
+			"rxFindAll": bson.M{"$regexFindAll": bson.M{"input": "$msg", "regex": "hello", "options": "i"}},
+
+			"toInt":    bson.M{"$toInt": "123"},
+			"toDouble": bson.M{"$toDouble": "1.25"},
+			"toBool":   bson.M{"$toBool": 0},
+			"toStr":    bson.M{"$toString": bson.M{"$toDate": "$created"}},
+			"typ":      bson.M{"$type": "$obj"},
+			"conv": bson.M{"$convert": bson.M{
+				"input":   "5",
+				"to":      "int",
+				"onError": -1,
+			}},
+
+			"parts": bson.M{"$dateToParts": bson.M{"date": bson.M{"$toDate": "$created"}}},
+			"fromParts": bson.M{"$dateFromParts": bson.M{
+				"year":  2026,
+				"month": 3,
+				"day":   28,
+				"hour":  10,
+			}},
+			"diffH": bson.M{"$dateDiff": bson.M{"startDate": bson.M{"$toDate": "$created"}, "endDate": bson.M{"$dateAdd": bson.M{"startDate": bson.M{"$toDate": "$created"}, "unit": "hour", "amount": 3}}, "unit": "hour"}},
+			"isoW":  bson.M{"$isoWeek": bson.M{"$toDate": "$created"}},
+		}},
+	}
+
+	out, err := applyPipeline(docs, pipeline)
+	if err != nil {
+		t.Fatalf("applyPipeline err: %v", err)
+	}
+	got := out[0]
+
+	if got["getA"] != 1 {
+		t.Fatalf("getA: %#v", got["getA"])
+	}
+	if got["idxArr"] != int64(1) {
+		t.Fatalf("idxArr: %#v", got["idxArr"])
+	}
+	if got["strcasecmp"] != int64(0) {
+		t.Fatalf("strcasecmp: %#v", got["strcasecmp"])
+	}
+	if got["toInt"] != int64(123) || got["toDouble"] != 1.25 || got["toBool"] != false || got["conv"] != int64(5) {
+		t.Fatalf("convert: toInt=%#v toDouble=%#v toBool=%#v conv=%#v", got["toInt"], got["toDouble"], got["toBool"], got["conv"])
+	}
+	if got["typ"] != "object" {
+		t.Fatalf("type: %#v", got["typ"])
+	}
+	if got["diffH"] != int64(3) {
+		t.Fatalf("dateDiff: %#v", got["diffH"])
+	}
+	if _, ok := got["isoW"].(int64); !ok {
+		t.Fatalf("isoWeek: %#v", got["isoW"])
+	}
+
+	rxFind, ok := got["rxFind"].(bson.M)
+	if !ok || rxFind["match"] == nil {
+		t.Fatalf("regexFind: %#v", got["rxFind"])
+	}
+	rxAll, ok := got["rxFindAll"].([]interface{})
+	if !ok || len(rxAll) != 2 {
+		t.Fatalf("regexFindAll: %#v", got["rxFindAll"])
+	}
+
+	parts, ok := got["parts"].(bson.M)
+	if !ok || parts["year"] != int64(2026) || parts["month"] != int64(3) {
+		t.Fatalf("dateToParts: %#v", got["parts"])
+	}
+	if _, ok := got["fromParts"].(time.Time); !ok {
+		t.Fatalf("dateFromParts: %#v", got["fromParts"])
+	}
+	if s, ok := got["toStr"].(string); !ok || !strings.HasPrefix(s, "2026-03-28T") {
+		t.Fatalf("toString(date): %#v", got["toStr"])
+	}
+
+	// setField/unsetField/mergeObjects are structural; spot-check keys.
+	setC, _ := got["setC"].(bson.M)
+	if setC["c"] != 3 {
+		t.Fatalf("setC: %#v", got["setC"])
+	}
+	unsetB, _ := got["unsetB"].(bson.M)
+	if _, ok := unsetB["b"]; ok {
+		t.Fatalf("unsetB: %#v", got["unsetB"])
+	}
+	merge, _ := got["merge"].(bson.M)
+	if merge["b"] != 10 || merge["d"] != 4 {
+		t.Fatalf("merge: %#v", got["merge"])
+	}
+	a2o, _ := got["a2o"].(bson.M)
+	if a2o["x"] != 1 || a2o["y"] != 2 {
+		t.Fatalf("arrayToObject: %#v", got["a2o"])
+	}
+	o2a, ok := got["o2a"].([]interface{})
+	if !ok || len(o2a) == 0 {
+		t.Fatalf("objectToArray: %#v", got["o2a"])
 	}
 }

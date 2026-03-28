@@ -5,6 +5,7 @@ import (
 	"math"
 	"math/rand"
 	"reflect"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -332,7 +333,8 @@ func applySetWindowFields(docs []bson.M, spec bson.M) ([]bson.M, error) {
 	// - sortBy: single field with 1/-1
 	// - output:
 	//   - $avg: "$field" with window documents ["unbounded","current"] (or omitted => treated the same)
-	//   - $rank: {}
+	//   - $rank / $denseRank / $documentNumber: {}
+	//   - $shift: { output: <expr>, by: <int>, default: <expr> }
 
 	var partitionBy interface{} = nil
 	if v, ok := spec["partitionBy"]; ok {
@@ -363,8 +365,10 @@ func applySetWindowFields(docs []bson.M, spec bson.M) ([]bson.M, error) {
 
 	type outOp struct {
 		outField string
-		kind     string // "avg" or "rank"
+		kind     string // "avg", "rank", "denseRank", "documentNumber", "shift"
 		arg      interface{}
+		by       int
+		def      interface{}
 	}
 	ops := make([]outOp, 0, len(outputSpec))
 	for outField, raw := range outputSpec {
@@ -393,6 +397,33 @@ func applySetWindowFields(docs []bson.M, spec bson.M) ([]bson.M, error) {
 		}
 		if _, ok := m["$rank"]; ok {
 			ops = append(ops, outOp{outField: outField, kind: "rank"})
+			continue
+		}
+		if _, ok := m["$denseRank"]; ok {
+			ops = append(ops, outOp{outField: outField, kind: "denseRank"})
+			continue
+		}
+		if _, ok := m["$documentNumber"]; ok {
+			ops = append(ops, outOp{outField: outField, kind: "documentNumber"})
+			continue
+		}
+		if shiftRaw, ok := m["$shift"]; ok {
+			shiftSpec, ok := coerceBsonM(shiftRaw)
+			if !ok {
+				return nil, fmt.Errorf("$shift must be a document")
+			}
+			outExpr, ok := shiftSpec["output"]
+			if !ok {
+				return nil, fmt.Errorf("$shift requires output")
+			}
+			by := 0
+			if rawBy, ok := shiftSpec["by"]; ok {
+				if n, err := asInt(rawBy); err == nil {
+					by = n
+				}
+			}
+			def := shiftSpec["default"]
+			ops = append(ops, outOp{outField: outField, kind: "shift", arg: outExpr, by: by, def: def})
 			continue
 		}
 		return nil, fmt.Errorf("unsupported $setWindowFields output operator: %v", m)
@@ -444,43 +475,72 @@ func applySetWindowFields(docs []bson.M, spec bson.M) ([]bson.M, error) {
 			return as < bs
 		})
 
-		// Pre-compute ranks for this partition if needed.
+		// Pre-compute ranks/numbers for this partition if needed.
 		needRank := false
+		needDense := false
+		needDocNum := false
 		for _, op := range ops {
 			if op.kind == "rank" {
 				needRank = true
-				break
+			}
+			if op.kind == "denseRank" {
+				needDense = true
+			}
+			if op.kind == "documentNumber" {
+				needDocNum = true
 			}
 		}
 
 		ranks := map[int]int64{}
-		if needRank {
+		denseRanks := map[int]int64{}
+		docNums := map[int]int64{}
+		if needRank || needDense || needDocNum {
 			var prev interface{} = nil
 			var havePrev bool
 			var rank int64
+			var dense int64
 			for pos, idx := range idxs {
 				cur := getPathValue(docs[idx], sortField)
-				if !havePrev || fmt.Sprint(cur) != fmt.Sprint(prev) {
-					rank = int64(pos + 1)
+				changed := !havePrev || fmt.Sprint(cur) != fmt.Sprint(prev)
+				if changed {
+					rank = int64(pos + 1) // with gaps
+					dense++               // without gaps
 					prev = cur
 					havePrev = true
 				}
-				ranks[idx] = rank
+				if needRank {
+					ranks[idx] = rank
+				}
+				if needDense {
+					denseRanks[idx] = dense
+				}
+				if needDocNum {
+					docNums[idx] = int64(pos + 1)
+				}
 			}
 		}
 
 		// Compute per-op window outputs in sorted order.
+		stageOpts := evalOpts{sizeNonArrayZero: false, vars: nil}
 		for _, op := range ops {
 			switch op.kind {
 			case "rank":
 				for _, idx := range idxs {
 					out[idx][op.outField] = ranks[idx]
 				}
+			case "denseRank":
+				for _, idx := range idxs {
+					out[idx][op.outField] = denseRanks[idx]
+				}
+			case "documentNumber":
+				for _, idx := range idxs {
+					out[idx][op.outField] = docNums[idx]
+				}
 			case "avg":
 				sum := 0.0
 				n := int64(0)
 				for _, idx := range idxs {
-					val, err := evalValue(docs[idx], op.arg)
+					val, err := evalComputedWithOpts(docs[idx], op.arg, stageOpts)
 					if err != nil {
 						return nil, err
 					}
@@ -493,6 +553,28 @@ func applySetWindowFields(docs []bson.M, spec bson.M) ([]bson.M, error) {
 					} else {
 						out[idx][op.outField] = sum / float64(n)
 					}
+				}
+			case "shift":
+				for pos, idx := range idxs {
+					target := pos + op.by
+					if target < 0 || target >= len(idxs) {
+						if op.def == nil {
+							out[idx][op.outField] = nil
+							continue
+						}
+						v, err := evalComputedWithOpts(docs[idx], op.def, stageOpts)
+						if err != nil {
+							return nil, err
+						}
+						out[idx][op.outField] = v
+						continue
+					}
+					shiftedDoc := docs[idxs[target]]
+					v, err := evalComputedWithOpts(shiftedDoc, op.arg, stageOpts)
+					if err != nil {
+						return nil, err
+					}
+					out[idx][op.outField] = v
 				}
 			}
 		}
@@ -1370,11 +1452,33 @@ func evalValue(doc bson.M, v interface{}) (interface{}, error) {
 
 type evalOpts struct {
 	sizeNonArrayZero bool
+	vars             map[string]interface{}
 }
 
 func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interface{}, error) {
 	// Field reference: "$field.subfield"
 	if s, ok := expr.(string); ok {
+		// Variables: "$$this", "$$value", "$$x.y"
+		if strings.HasPrefix(s, "$$") {
+			key := strings.TrimPrefix(s, "$$")
+			varName := key
+			rest := ""
+			if i := strings.IndexByte(key, '.'); i >= 0 {
+				varName = key[:i]
+				rest = key[i+1:]
+			}
+			if opts.vars == nil {
+				return nil, nil
+			}
+			v, ok := opts.vars[varName]
+			if !ok {
+				return nil, nil
+			}
+			if rest == "" {
+				return v, nil
+			}
+			return getPathValueAny(v, rest), nil
+		}
 		if len(s) > 1 && s[0] == '$' {
 			return getPathValue(doc, strings.TrimPrefix(s, "$")), nil
 		}
@@ -1747,6 +1851,246 @@ func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interfac
 					}
 					return out, nil
 
+				case "$map":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$map must be a document")
+					}
+					inRaw, okI := spec["input"]
+					exprRaw, okE := spec["in"]
+					if !okI || !okE {
+						return nil, fmt.Errorf("$map requires input/in")
+					}
+					as := "this"
+					if rawAs, ok := spec["as"].(string); ok && rawAs != "" {
+						as = rawAs
+					}
+					input, err := evalComputedWithOpts(doc, inRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					arr, ok := coerceInterfaceSlice(input)
+					if !ok {
+						return nil, nil
+					}
+					out := make([]interface{}, 0, len(arr))
+					for i, el := range arr {
+						child := opts
+						child.vars = cloneVars(opts.vars)
+						child.vars["this"] = el
+						child.vars[as] = el
+						child.vars["index"] = int64(i)
+						v, err := evalComputedWithOpts(doc, exprRaw, child)
+						if err != nil {
+							return nil, err
+						}
+						out = append(out, v)
+					}
+					return out, nil
+				case "$filter":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$filter must be a document")
+					}
+					inRaw, okI := spec["input"]
+					condRaw, okC := spec["cond"]
+					if !okI || !okC {
+						return nil, fmt.Errorf("$filter requires input/cond")
+					}
+					as := "this"
+					if rawAs, ok := spec["as"].(string); ok && rawAs != "" {
+						as = rawAs
+					}
+					input, err := evalComputedWithOpts(doc, inRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					arr, ok := coerceInterfaceSlice(input)
+					if !ok {
+						return nil, nil
+					}
+					limit := -1
+					if rawLim, ok := spec["limit"]; ok && rawLim != nil {
+						if n, err := asInt(rawLim); err == nil {
+							limit = n
+						}
+					}
+					out := make([]interface{}, 0, len(arr))
+					for i, el := range arr {
+						child := opts
+						child.vars = cloneVars(opts.vars)
+						child.vars["this"] = el
+						child.vars[as] = el
+						child.vars["index"] = int64(i)
+						cv, err := evalComputedWithOpts(doc, condRaw, child)
+						if err != nil {
+							return nil, err
+						}
+						if isTruthy(cv) {
+							out = append(out, el)
+							if limit >= 0 && len(out) >= limit {
+								break
+							}
+						}
+					}
+					return out, nil
+				case "$reduce":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$reduce must be a document")
+					}
+					inRaw, okI := spec["input"]
+					initRaw, okInit := spec["initialValue"]
+					inExpr, okIn := spec["in"]
+					if !okI || !okInit || !okIn {
+						return nil, fmt.Errorf("$reduce requires input/initialValue/in")
+					}
+					input, err := evalComputedWithOpts(doc, inRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					arr, ok := coerceInterfaceSlice(input)
+					if !ok {
+						return nil, nil
+					}
+					acc, err := evalComputedWithOpts(doc, initRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					for i, el := range arr {
+						child := opts
+						child.vars = cloneVars(opts.vars)
+						child.vars["this"] = el
+						child.vars["value"] = acc
+						child.vars["index"] = int64(i)
+						next, err := evalComputedWithOpts(doc, inExpr, child)
+						if err != nil {
+							return nil, err
+						}
+						acc = next
+					}
+					return acc, nil
+				case "$sortArray":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$sortArray must be a document")
+					}
+					inRaw, okI := spec["input"]
+					if !okI {
+						return nil, fmt.Errorf("$sortArray requires input")
+					}
+					inVal, err := evalComputedWithOpts(doc, inRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					arr, ok := coerceInterfaceSlice(inVal)
+					if !ok {
+						return nil, nil
+					}
+					// Default: ascending scalar sort.
+					dir := 1
+					var field string
+					if rawSortBy, ok := spec["sortBy"]; ok && rawSortBy != nil {
+						if n, err := asInt(rawSortBy); err == nil {
+							if n != 0 {
+								dir = n
+							}
+						} else if m, ok := coerceBsonM(rawSortBy); ok && len(m) > 0 {
+							for k, v := range m {
+								field = k
+								if n, err := asInt(v); err == nil && n != 0 {
+									dir = n
+								}
+								break
+							}
+						}
+					}
+					out := make([]interface{}, 0, len(arr))
+					out = append(out, arr...)
+					sort.SliceStable(out, func(i, j int) bool {
+						ai := out[i]
+						aj := out[j]
+						if field != "" {
+							ai = getPathValueAny(ai, field)
+							aj = getPathValueAny(aj, field)
+						}
+						c := cmp3(ai, aj)
+						if dir < 0 {
+							return c > 0
+						}
+						return c < 0
+					})
+					return out, nil
+				case "$zip":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$zip must be a document")
+					}
+					rawInputs, ok := spec["inputs"]
+					if !ok {
+						return nil, fmt.Errorf("$zip requires inputs")
+					}
+					inputsArr, ok := coerceInterfaceSlice(rawInputs)
+					if !ok || len(inputsArr) == 0 {
+						return nil, nil
+					}
+					inputs := make([][]interface{}, 0, len(inputsArr))
+					for _, it := range inputsArr {
+						v, err := evalComputedWithOpts(doc, it, opts)
+						if err != nil {
+							return nil, err
+						}
+						a, ok := coerceInterfaceSlice(v)
+						if !ok {
+							return nil, nil
+						}
+						inputs = append(inputs, a)
+					}
+					useLongest := false
+					if v, ok := spec["useLongestLength"]; ok {
+						if b, ok := v.(bool); ok {
+							useLongest = b
+						}
+					}
+					defaults := []interface{}{}
+					if rawDefs, ok := spec["defaults"]; ok {
+						if arr, ok := coerceInterfaceSlice(rawDefs); ok {
+							defaults = arr
+						}
+					}
+					n := 0
+					if useLongest {
+						for _, a := range inputs {
+							if len(a) > n {
+								n = len(a)
+							}
+						}
+					} else {
+						n = len(inputs[0])
+						for _, a := range inputs[1:] {
+							if len(a) < n {
+								n = len(a)
+							}
+						}
+					}
+					zipped := make([]interface{}, 0, n)
+					for i := 0; i < n; i++ {
+						row := make([]interface{}, 0, len(inputs))
+						for j, a := range inputs {
+							if i < len(a) {
+								row = append(row, a[i])
+								continue
+							}
+							if j < len(defaults) {
+								row = append(row, defaults[j])
+							} else {
+								row = append(row, nil)
+							}
+						}
+						zipped = append(zipped, row)
+					}
+					return zipped, nil
+
 				// Arithmetic
 				case "$add":
 					args, err := evalArrayArgs(doc, arg, 2, opts)
@@ -2005,6 +2349,194 @@ func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interfac
 						out = append(out, p)
 					}
 					return out, nil
+				case "$substr", "$substrBytes", "$substrCP":
+					args, err := evalArrayArgs(doc, arg, 3, opts)
+					if err != nil {
+						return nil, err
+					}
+					if args[0] == nil || args[1] == nil || args[2] == nil {
+						return nil, nil
+					}
+					s := fmt.Sprint(args[0])
+					start, ok := toInt64IfIntegral(args[1])
+					if !ok {
+						return nil, nil
+					}
+					n, ok := toInt64IfIntegral(args[2])
+					if !ok {
+						return nil, nil
+					}
+					if start < 0 {
+						start = 0
+					}
+					if n < 0 {
+						return "", nil
+					}
+					if op == "$substrCP" {
+						r := []rune(s)
+						if int(start) > len(r) {
+							return "", nil
+						}
+						end := int(start + n)
+						if end > len(r) {
+							end = len(r)
+						}
+						return string(r[start:end]), nil
+					}
+					// bytes (and $substr alias)
+					b := []byte(s)
+					if int(start) > len(b) {
+						return "", nil
+					}
+					end := int(start + n)
+					if end > len(b) {
+						end = len(b)
+					}
+					return string(b[start:end]), nil
+				case "$strLenCP":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					if v == nil {
+						return nil, nil
+					}
+					return int64(len([]rune(fmt.Sprint(v)))), nil
+				case "$indexOfBytes", "$indexOfCP":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					if args[0] == nil || args[1] == nil {
+						return nil, nil
+					}
+					s := fmt.Sprint(args[0])
+					sub := fmt.Sprint(args[1])
+					start := int64(0)
+					end := int64(-1)
+					if len(args) >= 3 {
+						if v, ok := toInt64IfIntegral(args[2]); ok {
+							start = v
+						}
+					}
+					if len(args) >= 4 {
+						if v, ok := toInt64IfIntegral(args[3]); ok {
+							end = v
+						}
+					}
+					if start < 0 {
+						start = 0
+					}
+					if op == "$indexOfCP" {
+						runes := []rune(s)
+						if int(start) > len(runes) {
+							return int64(-1), nil
+						}
+						hay := string(runes[start:])
+						if end >= 0 && int(end-start) < len([]rune(hay)) {
+							hay = string([]rune(hay)[:end-start])
+						}
+						idx := strings.Index(hay, sub)
+						if idx < 0 {
+							return int64(-1), nil
+						}
+						return start + int64(len([]rune(hay[:idx]))), nil
+					}
+					b := []byte(s)
+					if int(start) > len(b) {
+						return int64(-1), nil
+					}
+					b = b[start:]
+					if end >= 0 && int(end-start) < len(b) {
+						b = b[:end-start]
+					}
+					idx := bytesIndex(b, []byte(sub))
+					if idx < 0 {
+						return int64(-1), nil
+					}
+					return start + int64(idx), nil
+				case "$regexMatch":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$regexMatch must be a document")
+					}
+					inRaw, okI := spec["input"]
+					reRaw, okR := spec["regex"]
+					if !okI || !okR {
+						return nil, fmt.Errorf("$regexMatch requires input/regex")
+					}
+					in, err := evalComputedWithOpts(doc, inRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					if in == nil {
+						return nil, nil
+					}
+					pat, reOpts, err := coerceRegex(reRaw, spec["options"])
+					if err != nil {
+						return nil, err
+					}
+					rx, err := regexp.Compile(applyRegexOptions(pat, reOpts))
+					if err != nil {
+						return nil, err
+					}
+					return rx.MatchString(fmt.Sprint(in)), nil
+				case "$regexFind", "$regexFindAll":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("%s must be a document", op)
+					}
+					inRaw, okI := spec["input"]
+					reRaw, okR := spec["regex"]
+					if !okI || !okR {
+						return nil, fmt.Errorf("%s requires input/regex", op)
+					}
+					in, err := evalComputedWithOpts(doc, inRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					if in == nil {
+						return nil, nil
+					}
+					pat, reOpts, err := coerceRegex(reRaw, spec["options"])
+					if err != nil {
+						return nil, err
+					}
+					rx, err := regexp.Compile(applyRegexOptions(pat, reOpts))
+					if err != nil {
+						return nil, err
+					}
+					s := fmt.Sprint(in)
+					if op == "$regexFind" {
+						loc := rx.FindStringIndex(s)
+						if loc == nil {
+							return nil, nil
+						}
+						return bson.M{"match": s[loc[0]:loc[1]], "idx": int64(loc[0])}, nil
+					}
+					locs := rx.FindAllStringIndex(s, -1)
+					out := make([]interface{}, 0, len(locs))
+					for _, loc := range locs {
+						out = append(out, bson.M{"match": s[loc[0]:loc[1]], "idx": int64(loc[0])})
+					}
+					return out, nil
+				case "$strcasecmp":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					if args[0] == nil || args[1] == nil {
+						return nil, nil
+					}
+					a := strings.ToLower(fmt.Sprint(args[0]))
+					b := strings.ToLower(fmt.Sprint(args[1]))
+					if a < b {
+						return int64(-1), nil
+					}
+					if a > b {
+						return int64(1), nil
+					}
+					return int64(0), nil
 				case "$replaceOne", "$replaceAll":
 					spec, ok := coerceBsonM(arg)
 					if !ok {
@@ -2126,6 +2658,562 @@ func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interfac
 					return datePart(doc, arg, func(t time.Time) int64 { return int64(t.Weekday()) + 1 }, opts)
 				case "$week":
 					return datePart(doc, arg, func(t time.Time) int64 { return int64(mongoWeek(t)) }, opts)
+				case "$dateAdd", "$dateSubtract":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("%s must be a document", op)
+					}
+					startRaw, okS := spec["startDate"]
+					unit, _ := spec["unit"].(string)
+					rawAmt, okA := spec["amount"]
+					if !okS || !okA || unit == "" {
+						return nil, fmt.Errorf("%s requires startDate/unit/amount", op)
+					}
+					startVal, err := evalComputedWithOpts(doc, startRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					tm, ok := coerceTime(startVal)
+					if !ok {
+						return nil, nil
+					}
+					amt, ok := toInt64IfIntegral(rawAmt)
+					if !ok {
+						return nil, nil
+					}
+					if op == "$dateSubtract" {
+						amt = -amt
+					}
+					return dateAdd(tm, unit, amt), nil
+				case "$dateTrunc":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$dateTrunc must be a document")
+					}
+					dateRaw, okD := spec["date"]
+					unit, _ := spec["unit"].(string)
+					if !okD || unit == "" {
+						return nil, fmt.Errorf("$dateTrunc requires date/unit")
+					}
+					dateVal, err := evalComputedWithOpts(doc, dateRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					tm, ok := coerceTime(dateVal)
+					if !ok {
+						return nil, nil
+					}
+					binSize := int64(1)
+					if rawBin, ok := spec["binSize"]; ok {
+						if n, ok := toInt64IfIntegral(rawBin); ok && n > 0 {
+							binSize = n
+						}
+					}
+					startOfWeek := "Sunday"
+					if s, ok := spec["startOfWeek"].(string); ok && s != "" {
+						startOfWeek = s
+					}
+					return dateTrunc(tm, unit, binSize, startOfWeek), nil
+				case "$dateToString":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$dateToString must be a document")
+					}
+					dateRaw, okD := spec["date"]
+					if !okD {
+						return nil, fmt.Errorf("$dateToString requires date")
+					}
+					dateVal, err := evalComputedWithOpts(doc, dateRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					tm, ok := coerceTime(dateVal)
+					if !ok {
+						return nil, nil
+					}
+					format := "%Y-%m-%dT%H:%M:%S.%LZ"
+					if f, ok := spec["format"].(string); ok && f != "" {
+						format = f
+					}
+					layout, err := mongoDateFormatToGo(format)
+					if err != nil {
+						return nil, err
+					}
+					return tm.UTC().Format(layout), nil
+				case "$dateFromString":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$dateFromString must be a document")
+					}
+					dsRaw, okD := spec["dateString"]
+					if !okD {
+						return nil, fmt.Errorf("$dateFromString requires dateString")
+					}
+					dsVal, err := evalComputedWithOpts(doc, dsRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					if dsVal == nil {
+						return nil, nil
+					}
+					ds := fmt.Sprint(dsVal)
+					if f, ok := spec["format"].(string); ok && f != "" {
+						layout, err := mongoDateFormatToGo(f)
+						if err != nil {
+							return nil, err
+						}
+						tm, err := time.Parse(layout, ds)
+						if err != nil {
+							return nil, nil
+						}
+						return tm.UTC(), nil
+					}
+					tm, ok := coerceTime(ds)
+					if ok {
+						return tm.UTC(), nil
+					}
+					return nil, nil
+				case "$dateToParts":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$dateToParts must be a document")
+					}
+					dateRaw, okD := spec["date"]
+					if !okD {
+						return nil, fmt.Errorf("$dateToParts requires date")
+					}
+					dateVal, err := evalComputedWithOpts(doc, dateRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					tm, ok := coerceTime(dateVal)
+					if !ok {
+						return nil, nil
+					}
+					tm = tm.UTC()
+					return bson.M{
+						"year":        int64(tm.Year()),
+						"month":       int64(tm.Month()),
+						"day":         int64(tm.Day()),
+						"hour":        int64(tm.Hour()),
+						"minute":      int64(tm.Minute()),
+						"second":      int64(tm.Second()),
+						"millisecond": int64(tm.Nanosecond() / 1_000_000),
+					}, nil
+				case "$dateFromParts":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$dateFromParts must be a document")
+					}
+					yearRaw, okY := spec["year"]
+					if !okY {
+						return nil, fmt.Errorf("$dateFromParts requires year")
+					}
+					yv, err := evalComputedWithOpts(doc, yearRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					year, ok := toInt64IfIntegral(yv)
+					if !ok {
+						return nil, nil
+					}
+					month := int64(1)
+					day := int64(1)
+					hour := int64(0)
+					minute := int64(0)
+					second := int64(0)
+					millisecond := int64(0)
+					if v, ok := spec["month"]; ok {
+						if vv, err := evalComputedWithOpts(doc, v, opts); err == nil {
+							if n, ok := toInt64IfIntegral(vv); ok {
+								month = n
+							}
+						}
+					}
+					if v, ok := spec["day"]; ok {
+						if vv, err := evalComputedWithOpts(doc, v, opts); err == nil {
+							if n, ok := toInt64IfIntegral(vv); ok {
+								day = n
+							}
+						}
+					}
+					if v, ok := spec["hour"]; ok {
+						if vv, err := evalComputedWithOpts(doc, v, opts); err == nil {
+							if n, ok := toInt64IfIntegral(vv); ok {
+								hour = n
+							}
+						}
+					}
+					if v, ok := spec["minute"]; ok {
+						if vv, err := evalComputedWithOpts(doc, v, opts); err == nil {
+							if n, ok := toInt64IfIntegral(vv); ok {
+								minute = n
+							}
+						}
+					}
+					if v, ok := spec["second"]; ok {
+						if vv, err := evalComputedWithOpts(doc, v, opts); err == nil {
+							if n, ok := toInt64IfIntegral(vv); ok {
+								second = n
+							}
+						}
+					}
+					if v, ok := spec["millisecond"]; ok {
+						if vv, err := evalComputedWithOpts(doc, v, opts); err == nil {
+							if n, ok := toInt64IfIntegral(vv); ok {
+								millisecond = n
+							}
+						}
+					}
+					return time.Date(int(year), time.Month(month), int(day), int(hour), int(minute), int(second), int(millisecond)*1_000_000, time.UTC), nil
+				case "$dateDiff":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$dateDiff must be a document")
+					}
+					startRaw, okS := spec["startDate"]
+					endRaw, okE := spec["endDate"]
+					unit, _ := spec["unit"].(string)
+					if !okS || !okE || unit == "" {
+						return nil, fmt.Errorf("$dateDiff requires startDate/endDate/unit")
+					}
+					sv, err := evalComputedWithOpts(doc, startRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					ev, err := evalComputedWithOpts(doc, endRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					st, ok := coerceTime(sv)
+					if !ok {
+						return nil, nil
+					}
+					et, ok := coerceTime(ev)
+					if !ok {
+						return nil, nil
+					}
+					d := et.UTC().Sub(st.UTC())
+					switch strings.ToLower(unit) {
+					case "millisecond":
+						return int64(d / time.Millisecond), nil
+					case "second":
+						return int64(d / time.Second), nil
+					case "minute":
+						return int64(d / time.Minute), nil
+					case "hour":
+						return int64(d / time.Hour), nil
+					case "day":
+						return int64(d / (24 * time.Hour)), nil
+					default:
+						return nil, fmt.Errorf("$dateDiff unsupported unit: %s", unit)
+					}
+				case "$isoWeek":
+					return datePart(doc, arg, func(t time.Time) int64 {
+						_, w := t.ISOWeek()
+						return int64(w)
+					}, opts)
+				case "$isoWeekYear":
+					return datePart(doc, arg, func(t time.Time) int64 {
+						y, _ := t.ISOWeek()
+						return int64(y)
+					}, opts)
+				case "$isoDayOfWeek":
+					return datePart(doc, arg, func(t time.Time) int64 {
+						// Monday=1 .. Sunday=7
+						wd := int64(t.Weekday())
+						if wd == 0 {
+							return 7
+						}
+						return wd
+					}, opts)
+
+				// Object
+				case "$getField":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$getField must be a document")
+					}
+					fieldRaw, okF := spec["field"]
+					inputRaw, okI := spec["input"]
+					if !okF || !okI {
+						return nil, fmt.Errorf("$getField requires field/input")
+					}
+					fv, err := evalComputedWithOpts(doc, fieldRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					iv, err := evalComputedWithOpts(doc, inputRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					if fv == nil || iv == nil {
+						return nil, nil
+					}
+					m, ok := coerceBsonM(iv)
+					if !ok {
+						return nil, nil
+					}
+					return m[fmt.Sprint(fv)], nil
+				case "$setField":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$setField must be a document")
+					}
+					fieldRaw, okF := spec["field"]
+					inputRaw, okI := spec["input"]
+					valRaw, okV := spec["value"]
+					if !okF || !okI || !okV {
+						return nil, fmt.Errorf("$setField requires field/input/value")
+					}
+					fv, err := evalComputedWithOpts(doc, fieldRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					iv, err := evalComputedWithOpts(doc, inputRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					vv, err := evalComputedWithOpts(doc, valRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					if fv == nil || iv == nil {
+						return nil, nil
+					}
+					m, ok := coerceBsonM(iv)
+					if !ok {
+						return nil, nil
+					}
+					out := bson.M{}
+					for k, v := range m {
+						out[k] = v
+					}
+					out[fmt.Sprint(fv)] = vv
+					return out, nil
+				case "$unsetField":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$unsetField must be a document")
+					}
+					fieldRaw, okF := spec["field"]
+					inputRaw, okI := spec["input"]
+					if !okF || !okI {
+						return nil, fmt.Errorf("$unsetField requires field/input")
+					}
+					fv, err := evalComputedWithOpts(doc, fieldRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					iv, err := evalComputedWithOpts(doc, inputRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					if fv == nil || iv == nil {
+						return nil, nil
+					}
+					m, ok := coerceBsonM(iv)
+					if !ok {
+						return nil, nil
+					}
+					out := bson.M{}
+					for k, v := range m {
+						out[k] = v
+					}
+					delete(out, fmt.Sprint(fv))
+					return out, nil
+				case "$mergeObjects":
+					args, err := evalArrayArgs(doc, arg, 1, opts)
+					if err != nil {
+						return nil, err
+					}
+					out := bson.M{}
+					for _, it := range args {
+						if it == nil {
+							continue
+						}
+						m, ok := coerceBsonM(it)
+						if !ok {
+							continue
+						}
+						for k, v := range m {
+							out[k] = v
+						}
+					}
+					return out, nil
+
+				// Object/Array conversion
+				case "$objectToArray":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					m, ok := coerceBsonM(v)
+					if !ok {
+						return nil, nil
+					}
+					out := make([]interface{}, 0, len(m))
+					for k, vv := range m {
+						out = append(out, bson.M{"k": k, "v": vv})
+					}
+					return out, nil
+				case "$arrayToObject":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					arr, ok := coerceInterfaceSlice(v)
+					if !ok {
+						return nil, nil
+					}
+					out := bson.M{}
+					for _, it := range arr {
+						if m, ok := coerceBsonM(it); ok {
+							k, okK := m["k"]
+							vv, okV := m["v"]
+							if okK && okV {
+								out[fmt.Sprint(k)] = vv
+							}
+							continue
+						}
+						if pair, ok := coerceInterfaceSlice(it); ok && len(pair) == 2 {
+							out[fmt.Sprint(pair[0])] = pair[1]
+						}
+					}
+					return out, nil
+				case "$indexOfArray":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					arr, ok := coerceInterfaceSlice(args[0])
+					if !ok {
+						return int64(-1), nil
+					}
+					search := fmt.Sprint(args[1])
+					start := int64(0)
+					end := int64(len(arr))
+					if len(args) >= 3 {
+						if v, ok := toInt64IfIntegral(args[2]); ok {
+							start = v
+						}
+					}
+					if len(args) >= 4 {
+						if v, ok := toInt64IfIntegral(args[3]); ok {
+							end = v
+						}
+					}
+					if start < 0 {
+						start = 0
+					}
+					if end > int64(len(arr)) {
+						end = int64(len(arr))
+					}
+					for i := start; i < end; i++ {
+						if fmt.Sprint(arr[i]) == search {
+							return i, nil
+						}
+					}
+					return int64(-1), nil
+
+				// Type conversion
+				case "$toString":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					if v == nil {
+						return nil, nil
+					}
+					if tm, ok := coerceTime(v); ok {
+						return tm.UTC().Format(time.RFC3339Nano), nil
+					}
+					return fmt.Sprint(v), nil
+				case "$toInt", "$toLong":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					if v == nil {
+						return nil, nil
+					}
+					if i, ok := toInt64IfIntegral(v); ok {
+						return i, nil
+					}
+					if f, ok := toFloat64(v); ok {
+						return int64(f), nil
+					}
+					return nil, nil
+				case "$toDouble":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					if v == nil {
+						return nil, nil
+					}
+					if f, ok := toFloat64(v); ok {
+						return f, nil
+					}
+					return nil, nil
+				case "$toBool":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					if v == nil {
+						return nil, nil
+					}
+					switch x := v.(type) {
+					case bool:
+						return x, nil
+					case string:
+						return x != "", nil
+					default:
+						if f, ok := toFloat64(v); ok {
+							return f != 0, nil
+						}
+						return isTruthy(v), nil
+					}
+				case "$type":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					return mongoTypeOf(v), nil
+				case "$convert":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$convert must be a document")
+					}
+					inRaw, okI := spec["input"]
+					toRaw, okT := spec["to"]
+					if !okI || !okT {
+						return nil, fmt.Errorf("$convert requires input/to")
+					}
+					inVal, err := evalComputedWithOpts(doc, inRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					if inVal == nil {
+						if onNull, ok := spec["onNull"]; ok {
+							return evalComputedWithOpts(doc, onNull, opts)
+						}
+						return nil, nil
+					}
+					toVal, err := evalComputedWithOpts(doc, toRaw, opts)
+					if err != nil {
+						return nil, err
+					}
+					to := strings.ToLower(fmt.Sprint(toVal))
+					converted, ok := convertTo(to, inVal)
+					if ok {
+						return converted, nil
+					}
+					if onErr, ok := spec["onError"]; ok {
+						return evalComputedWithOpts(doc, onErr, opts)
+					}
+					return nil, nil
 
 				default:
 					return nil, fmt.Errorf("unsupported computed expression: %v", m)
@@ -2219,6 +3307,183 @@ func mongoWeek(t time.Time) int {
 	}
 	days := int(t.Sub(firstSunday).Hours() / 24)
 	return 1 + (days / 7)
+}
+
+func cloneVars(in map[string]interface{}) map[string]interface{} {
+	if in == nil {
+		return map[string]interface{}{}
+	}
+	out := make(map[string]interface{}, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func getPathValueAny(root interface{}, path string) interface{} {
+	if path == "" {
+		return root
+	}
+	cur := root
+	for _, p := range strings.Split(path, ".") {
+		m, ok := coerceBsonM(cur)
+		if !ok {
+			return nil
+		}
+		v, ok := m[p]
+		if !ok {
+			return nil
+		}
+		cur = v
+	}
+	return cur
+}
+
+func bytesIndex(b, sub []byte) int {
+	// tiny helper to avoid importing bytes just for Index
+	if len(sub) == 0 {
+		return 0
+	}
+	for i := 0; i+len(sub) <= len(b); i++ {
+		if string(b[i:i+len(sub)]) == string(sub) {
+			return i
+		}
+	}
+	return -1
+}
+
+func coerceRegex(raw interface{}, rawOptions interface{}) (pattern string, options string, err error) {
+	switch t := raw.(type) {
+	case string:
+		pattern = t
+	case bson.RegEx:
+		pattern = t.Pattern
+		options = t.Options
+	default:
+		if m, ok := coerceBsonM(raw); ok {
+			// Extended JSON shape: { $regex: "...", $options: "i" }
+			if r, ok := m["$regex"].(string); ok {
+				pattern = r
+			}
+			if o, ok := m["$options"].(string); ok {
+				options = o
+			}
+		}
+	}
+	if o, ok := rawOptions.(string); ok && o != "" {
+		options = o
+	}
+	if pattern == "" {
+		return "", "", fmt.Errorf("regex must be a string")
+	}
+	return pattern, options, nil
+}
+
+func applyRegexOptions(pattern string, options string) string {
+	// Support a small subset of Mongo options.
+	prefix := ""
+	if strings.Contains(options, "i") {
+		prefix += "(?i)"
+	}
+	if strings.Contains(options, "m") {
+		prefix += "(?m)"
+	}
+	if strings.Contains(options, "s") {
+		prefix += "(?s)"
+	}
+	return prefix + pattern
+}
+
+func mongoDateFormatToGo(fmtStr string) (string, error) {
+	// Minimal token mapping. Unsupported tokens return an error.
+	out := fmtStr
+	repls := []struct{ from, to string }{
+		{"%Y", "2006"},
+		{"%m", "01"},
+		{"%d", "02"},
+		{"%H", "15"},
+		{"%M", "04"},
+		{"%S", "05"},
+		{"%L", "000"},
+		{"%z", "-0700"},
+	}
+	for _, r := range repls {
+		out = strings.ReplaceAll(out, r.from, r.to)
+	}
+	if strings.Contains(out, "%") {
+		return "", fmt.Errorf("unsupported date format token in %q", fmtStr)
+	}
+	return out, nil
+}
+
+func dateAdd(t time.Time, unit string, amount int64) time.Time {
+	t = t.UTC()
+	switch strings.ToLower(unit) {
+	case "millisecond":
+		return t.Add(time.Duration(amount) * time.Millisecond)
+	case "second":
+		return t.Add(time.Duration(amount) * time.Second)
+	case "minute":
+		return t.Add(time.Duration(amount) * time.Minute)
+	case "hour":
+		return t.Add(time.Duration(amount) * time.Hour)
+	case "day":
+		return t.AddDate(0, 0, int(amount))
+	case "week":
+		return t.AddDate(0, 0, int(amount*7))
+	case "month":
+		return t.AddDate(0, int(amount), 0)
+	case "year":
+		return t.AddDate(int(amount), 0, 0)
+	default:
+		return t
+	}
+}
+
+func dateTrunc(t time.Time, unit string, binSize int64, startOfWeek string) time.Time {
+	t = t.UTC()
+	if binSize <= 0 {
+		binSize = 1
+	}
+	epoch := time.Date(1970, 1, 1, 0, 0, 0, 0, time.UTC)
+	switch strings.ToLower(unit) {
+	case "second":
+		sec := (t.Unix() / binSize) * binSize
+		return time.Unix(sec, 0).UTC()
+	case "minute":
+		sec := (t.Unix() / 60 / binSize) * 60 * binSize
+		return time.Unix(sec, 0).UTC()
+	case "hour":
+		sec := (t.Unix() / 3600 / binSize) * 3600 * binSize
+		return time.Unix(sec, 0).UTC()
+	case "day":
+		d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+		days := int64(d.Sub(epoch).Hours() / 24)
+		tdays := (days / binSize) * binSize
+		return epoch.AddDate(0, 0, int(tdays))
+	case "week":
+		// Minimal: Sunday-based weeks by default.
+		wd := int(t.Weekday()) // Sunday=0
+		start := strings.ToLower(startOfWeek)
+		shift := 0
+		if start == "monday" {
+			shift = 1
+		}
+		// Compute start of week.
+		d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
+		d = d.AddDate(0, 0, -((wd - shift + 7) % 7))
+		weeks := int64(d.Sub(epoch).Hours() / 24 / 7)
+		tweeks := (weeks / binSize) * binSize
+		return epoch.AddDate(0, 0, int(tweeks*7))
+	case "month":
+		m := int((int64(t.Month())-1)/binSize*binSize) + 1
+		return time.Date(t.Year(), time.Month(m), 1, 0, 0, 0, 0, time.UTC)
+	case "year":
+		y := int(int64(t.Year()) / binSize * binSize)
+		return time.Date(y, 1, 1, 0, 0, 0, 0, time.UTC)
+	default:
+		return t
+	}
 }
 
 func coerceTime(v interface{}) (time.Time, bool) {
@@ -2594,6 +3859,83 @@ func lessValue(a, b interface{}) bool {
 		}
 	}
 	return fmt.Sprint(a) < fmt.Sprint(b)
+}
+
+func mongoTypeOf(v interface{}) interface{} {
+	if v == nil {
+		return "null"
+	}
+	switch v.(type) {
+	case float32, float64:
+		return "double"
+	case int, int8, int16, int32:
+		return "int"
+	case int64, uint, uint8, uint16, uint32, uint64:
+		return "long"
+	case string:
+		return "string"
+	case bool:
+		return "bool"
+	case time.Time:
+		return "date"
+	case bson.M, map[string]interface{}:
+		return "object"
+	default:
+		rv := reflect.ValueOf(v)
+		if rv.IsValid() && (rv.Kind() == reflect.Slice || rv.Kind() == reflect.Array) {
+			return "array"
+		}
+		return "unknown"
+	}
+}
+
+func convertTo(to string, v interface{}) (interface{}, bool) {
+	switch to {
+	case "string":
+		if v == nil {
+			return nil, true
+		}
+		if tm, ok := coerceTime(v); ok {
+			return tm.UTC().Format(time.RFC3339Nano), true
+		}
+		return fmt.Sprint(v), true
+	case "int", "long":
+		if i, ok := toInt64IfIntegral(v); ok {
+			return i, true
+		}
+		if f, ok := toFloat64(v); ok {
+			return int64(f), true
+		}
+		return nil, false
+	case "double":
+		if f, ok := toFloat64(v); ok {
+			return f, true
+		}
+		return nil, false
+	case "bool":
+		if v == nil {
+			return nil, true
+		}
+		switch x := v.(type) {
+		case bool:
+			return x, true
+		case string:
+			return x != "", true
+		default:
+			if f, ok := toFloat64(v); ok {
+				return f != 0, true
+			}
+			return isTruthy(v), true
+		}
+	case "date":
+		tm, ok := coerceTime(v)
+		if !ok {
+			return nil, false
+		}
+		return tm.UTC(), true
+	default:
+		return nil, false
+	}
 }
 
 func toInt64IfIntegral(v interface{}) (int64, bool) {
