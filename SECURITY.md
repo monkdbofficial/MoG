@@ -1,17 +1,7 @@
-# Security Policy
+# Security Reporting
 
-## Reporting a vulnerability
+Thank you in advance for helping us keep MonkDB secure!
 
-Please do not open public issues for security vulnerabilities.
+Please report any security issues or vulnerabilities to [security@monkdb.com](mailto:security@monkdb.com), before proceeding to post them publicly as issues on GitHub. These issues might also affect other users, and security vulnerabilities need to be handled quickly and sometimes privately.
 
-Preferred: use **GitHub Security Advisories** (the repo’s **Security** tab → “Report a vulnerability”), if available.
-
-If Security Advisories aren’t enabled for this repo, open a GitHub issue that simply says you have a security report and ask for a private reporting channel (do **not** include sensitive details).
-
-Include:
-
-- a description of the issue
-- steps to reproduce
-- potential impact
-
-We will respond as quickly as possible and coordinate a fix/release.
+We will triage the issue, contact you for further instructions and make sure to take any necessary measures as needed.
