@@ -8,6 +8,8 @@ import (
 
 	"go.mongodb.org/mongo-driver/x/mongo/driver/wiremessage"
 	"gopkg.in/mgo.v2/bson"
+
+	mwire "mog/internal/mongo/wire"
 )
 
 // Reply builders and common admin/handshake documents.
@@ -17,14 +19,14 @@ func (h *Handler) newMsg(requestID int32, doc bson.M) ([]byte, error) {
 		return nil, err
 	}
 
-	op := &OpMsg{
-		Header: MsgHeader{
+	op := &mwire.OpMsg{
+		Header: mwire.MsgHeader{
 			RequestID:  0, // We could increment this
 			ResponseTo: requestID,
 			OpCode:     wiremessage.OpMsg,
 		},
 		FlagBits: 0,
-		Sections: []Section{SectionBody{Document: bytes}},
+		Sections: []mwire.Section{mwire.SectionBody{Document: bytes}},
 	}
 
 	return op.Marshal()
@@ -45,8 +47,8 @@ func (h *Handler) newReply(requestID int32, doc bson.M) ([]byte, error) {
 		return nil, err
 	}
 
-	op := &OpReply{
-		Header: MsgHeader{
+	op := &mwire.OpReply{
+		Header: mwire.MsgHeader{
 			RequestID:  0,
 			ResponseTo: requestID,
 			OpCode:     wiremessage.OpReply,

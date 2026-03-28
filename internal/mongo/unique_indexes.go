@@ -9,6 +9,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/mgo.v2/bson"
+
+	mpipeline "mog/internal/mongo/pipeline"
 )
 
 type uniqueIndexDef struct {
@@ -109,7 +111,7 @@ func (h *Handler) checkUniqueViolation(ctx context.Context, physical string, doc
 				if exists {
 					parts := make([]string, 0, len(idx.fields))
 					for _, f := range idx.fields {
-						parts = append(parts, fmt.Sprintf("%s: %v", f, getPathValue(doc, f)))
+						parts = append(parts, fmt.Sprintf("%s: %v", f, mpipeline.GetPathValue(doc, f)))
 					}
 					return "{" + strings.Join(parts, ", ") + "}", idx.name, true
 				}
@@ -142,7 +144,7 @@ func (h *Handler) checkUniqueViolation(ctx context.Context, physical string, doc
 			if uniqueIndexKeyTuplesIntersect(newKeyTuples, existingKeyTuples) {
 				parts := make([]string, 0, len(idx.fields))
 				for _, f := range idx.fields {
-					parts = append(parts, fmt.Sprintf("%s: %v", f, getPathValue(doc, f)))
+					parts = append(parts, fmt.Sprintf("%s: %v", f, mpipeline.GetPathValue(doc, f)))
 				}
 				return "{" + strings.Join(parts, ", ") + "}", idx.name, true
 			}
@@ -215,7 +217,7 @@ func uniqueIndexKeyTuples(doc bson.M, fields []string) ([][]interface{}, bool) {
 
 	valueSets := make([][]interface{}, 0, len(fields))
 	for _, f := range fields {
-		v := getPathValue(doc, f)
+		v := mpipeline.GetPathValue(doc, f)
 		if v == nil {
 			return nil, false
 		}
@@ -290,7 +292,7 @@ func uniqueIndexKeyTupleEquals(a, b []interface{}) bool {
 		return false
 	}
 	for i := 0; i < len(a); i++ {
-		if !matchEquals(a[i], b[i]) {
+		if !mpipeline.MatchEquals(a[i], b[i]) {
 			return false
 		}
 	}

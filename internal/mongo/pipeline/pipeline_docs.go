@@ -1,4 +1,4 @@
-package agg
+package pipeline
 
 import "gopkg.in/mgo.v2/bson"
 

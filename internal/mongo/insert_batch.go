@@ -10,6 +10,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 
 	"mog/internal/logging"
+	mpipeline "mog/internal/mongo/pipeline"
 )
 
 type insertPreparedDoc struct {
@@ -164,7 +165,7 @@ func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []int
 						}
 						valExprs = append(valExprs, lit)
 					case sqlType == "DOUBLE PRECISION":
-						if f, ok := toFloat64Match(v); ok {
+						if f, ok := mpipeline.ToFloat64Match(v); ok {
 							v = f
 						}
 						argN++

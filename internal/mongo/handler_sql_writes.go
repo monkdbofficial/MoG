@@ -7,6 +7,8 @@ import (
 	"strings"
 
 	"gopkg.in/mgo.v2/bson"
+
+	mpipeline "mog/internal/mongo/pipeline"
 )
 
 // SQL-backed write helpers.
@@ -69,7 +71,7 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 			args = append(args, js)
 			setParts = append(setParts, fmt.Sprintf("%s = CAST($%d AS OBJECT(DYNAMIC))", c, len(args)))
 		case "DOUBLE PRECISION":
-			if f, ok := toFloat64Match(v); ok {
+			if f, ok := mpipeline.ToFloat64Match(v); ok {
 				args = append(args, f)
 			} else {
 				args = append(args, v)
@@ -203,7 +205,7 @@ func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physica
 			args = append(args, js)
 			exprs = append(exprs, fmt.Sprintf("CAST($%d AS OBJECT(DYNAMIC))", len(args)))
 		case "DOUBLE PRECISION":
-			if f, ok := toFloat64Match(v); ok {
+			if f, ok := mpipeline.ToFloat64Match(v); ok {
 				args = append(args, f)
 			} else {
 				args = append(args, v)

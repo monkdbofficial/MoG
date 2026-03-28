@@ -11,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/x/mongo/driver/wiremessage"
 	"gopkg.in/mgo.v2/bson"
 
+	mwire "mog/internal/mongo/wire"
 	"mog/internal/translator"
 )
 
@@ -22,19 +23,19 @@ func opMsgRoundTrip(t *testing.T, h *Handler, cmd bson.M) bson.M {
 		t.Fatalf("marshal cmd: %v", err)
 	}
 
-	req := &OpMsg{
-		Header: MsgHeader{
+	req := &mwire.OpMsg{
+		Header: mwire.MsgHeader{
 			RequestID: 1,
 			OpCode:    wiremessage.OpMsg,
 		},
-		Sections: []Section{SectionBody{Document: doc}},
+		Sections: []mwire.Section{mwire.SectionBody{Document: doc}},
 	}
 	wire, err := req.Marshal()
 	if err != nil {
 		t.Fatalf("marshal opmsg: %v", err)
 	}
 
-	header, body, err := ReadOp(bytes.NewReader(wire))
+	header, body, err := mwire.ReadOp(bytes.NewReader(wire))
 	if err != nil {
 		t.Fatalf("read op: %v", err)
 	}
@@ -44,7 +45,7 @@ func opMsgRoundTrip(t *testing.T, h *Handler, cmd bson.M) bson.M {
 		t.Fatalf("handler returned error: %v", err)
 	}
 
-	respHeader, respBody, err := ReadOp(bytes.NewReader(respWire))
+	respHeader, respBody, err := mwire.ReadOp(bytes.NewReader(respWire))
 	if err != nil {
 		t.Fatalf("read resp op: %v", err)
 	}
@@ -52,14 +53,14 @@ func opMsgRoundTrip(t *testing.T, h *Handler, cmd bson.M) bson.M {
 		t.Fatalf("expected OpMsg response, got %v", respHeader.OpCode)
 	}
 
-	resp, err := ParseOpMsg(respHeader, respBody)
+	resp, err := mwire.ParseOpMsg(respHeader, respBody)
 	if err != nil {
 		t.Fatalf("parse resp opmsg: %v", err)
 	}
 	if len(resp.Sections) == 0 {
 		t.Fatalf("expected at least one section")
 	}
-	sec, ok := resp.Sections[0].(SectionBody)
+	sec, ok := resp.Sections[0].(mwire.SectionBody)
 	if !ok {
 		t.Fatalf("expected section body")
 	}

@@ -8,6 +8,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/mgo.v2/bson"
+
+	mpipeline "mog/internal/mongo/pipeline"
+	mupdate "mog/internal/mongo/update"
 )
 
 func (h *Handler) applyDynamicUpdate(ctx context.Context, tx pgx.Tx, physical string, filter bson.M, update bson.M, multi bool) (matched int, modified int, err error) {
@@ -66,7 +69,7 @@ func (h *Handler) applyDynamicUpdate(ctx context.Context, tx pgx.Tx, physical st
 
 	matched = len(found)
 	for _, fd := range found {
-		newDoc, _ := ApplyUpdate(fd.doc, update)
+		newDoc, _ := mupdate.ApplyUpdate(fd.doc, update)
 		normalizeDocForStorage(newDoc)
 
 		docJSON, err := marshalObject(newDoc)
@@ -114,7 +117,7 @@ func (h *Handler) applyPureSQLUpdate(ctx context.Context, exec DBExecutor, physi
 
 	var targets []pureSQLDoc
 	for _, pd := range pdocs {
-		if matchDoc(pd.doc, filter) {
+		if mpipeline.MatchDoc(pd.doc, filter) {
 			targets = append(targets, pd)
 			if !multi {
 				break
@@ -128,8 +131,8 @@ func (h *Handler) applyPureSQLUpdate(ctx context.Context, exec DBExecutor, physi
 			return 0, 0, nil, nil
 		}
 
-		insDoc := buildUpsertBaseDoc(filter)
-		insDoc, _ = ApplyUpdate(insDoc, update)
+		insDoc := mupdate.BuildUpsertBaseDoc(filter)
+		insDoc, _ = mupdate.ApplyUpdate(insDoc, update)
 		normalizeDocForStorage(insDoc)
 		docID, err := encodeDocID(insDoc["_id"])
 		if err != nil {
@@ -149,7 +152,7 @@ func (h *Handler) applyPureSQLUpdate(ctx context.Context, exec DBExecutor, physi
 	}
 
 	for _, t := range targets {
-		newDoc, _ := ApplyUpdate(t.doc, update)
+		newDoc, _ := mupdate.ApplyUpdate(t.doc, update)
 		normalizeDocForStorage(newDoc)
 		// Ensure _id remains stable even if an update tries to change it.
 		if oldID, ok := t.doc["_id"]; ok {

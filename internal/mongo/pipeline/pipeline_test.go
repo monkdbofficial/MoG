@@ -1,4 +1,4 @@
-package mongo
+package pipeline
 
 import (
 	"fmt"
@@ -23,9 +23,9 @@ func TestApplyPipeline_GroupAvgSortLimit(t *testing.T) {
 		{"$limit": 1},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 1 {
 		t.Fatalf("expected 1 doc, got %d", len(out))
@@ -46,9 +46,9 @@ func TestApplyPipeline_ProjectMultiply(t *testing.T) {
 		{"$project": bson.M{"name": 1, "computed": bson.M{"$multiply": []interface{}{"$score", 3}}}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if out[0]["name"] != "a" {
 		t.Fatalf("expected name preserved, got %#v", out[0])
@@ -72,9 +72,9 @@ func TestApplyPipeline_AddFields_DatePartsAndArithmetic(t *testing.T) {
 		}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if out[0]["y"] != int64(2024) {
 		t.Fatalf("expected y=2024, got %#v", out[0]["y"])
@@ -106,9 +106,9 @@ func TestApplyPipeline_ProjectSize(t *testing.T) {
 		{"$project": bson.M{"_id": 1, "user_count": bson.M{"$size": "$users"}}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if out[0]["user_count"] != int64(3) {
 		t.Fatalf("expected user_count=3, got %#v", out[0]["user_count"])
@@ -132,12 +132,12 @@ func TestApplyPipeline_UnsetStage_StringAndArray(t *testing.T) {
 		{"_id": 1, "a": 1, "nested": bson.M{"b": 2, "c": 3}},
 	}
 
-	out, err := applyPipeline(docs, []bson.M{
+	out, err := ApplyPipeline(docs, []bson.M{
 		{"$unset": "a"},
 		{"$unset": []interface{}{"_id", "nested.b"}},
 	})
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 1 {
 		t.Fatalf("expected 1 doc, got %d", len(out))
@@ -176,9 +176,9 @@ func TestApplyPipeline_GroupConstantIDCount(t *testing.T) {
 		{"$group": bson.M{"_id": nil, "n": bson.M{"$sum": 1}}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 1 {
 		t.Fatalf("expected 1 doc, got %d", len(out))
@@ -193,9 +193,9 @@ func TestApplyPipeline_CountStage(t *testing.T) {
 		{"a": 1},
 		{"a": 2},
 	}
-	out, err := applyPipeline(docs, []bson.M{{"$count": "n"}})
+	out, err := ApplyPipeline(docs, []bson.M{{"$count": "n"}})
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 1 || out[0]["n"] != int64(2) {
 		t.Fatalf("unexpected out: %#v", out)
@@ -229,9 +229,9 @@ func TestApplyPipeline_Lookup_NestedAndMissing(t *testing.T) {
 		return foreign, nil
 	}
 
-	out, err := applyPipelineWithLookup(base, pipeline, resolver)
+	out, err := ApplyPipelineWithLookup(base, pipeline, resolver)
 	if err != nil {
-		t.Fatalf("applyPipelineWithLookup err: %v", err)
+		t.Fatalf("ApplyPipelineWithLookup err: %v", err)
 	}
 	if _, ok := base[0]["cities"]; ok {
 		t.Fatalf("expected base docs not mutated")
@@ -260,9 +260,9 @@ func TestApplyPipeline_Lookup_ArrayLocalField(t *testing.T) {
 			"as":           "matches",
 		}},
 	}
-	out, err := applyPipelineWithLookup(base, pipeline, func(from string) ([]bson.M, error) { return foreign, nil })
+	out, err := ApplyPipelineWithLookup(base, pipeline, func(from string) ([]bson.M, error) { return foreign, nil })
 	if err != nil {
-		t.Fatalf("applyPipelineWithLookup err: %v", err)
+		t.Fatalf("ApplyPipelineWithLookup err: %v", err)
 	}
 	got := out[0]["matches"].([]bson.M)
 	if len(got) != 1 || got[0]["tag"] != "a" {
@@ -274,9 +274,9 @@ func TestApplyPipeline_Unwind_Simple(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "orders": []interface{}{bson.M{"id": 10}, bson.M{"id": 11}}},
 	}
-	out, err := applyPipeline(docs, []bson.M{{"$unwind": "$orders"}})
+	out, err := ApplyPipeline(docs, []bson.M{{"$unwind": "$orders"}})
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 2 {
 		t.Fatalf("expected 2 docs, got %d", len(out))
@@ -295,9 +295,9 @@ func TestApplyPipeline_Unwind_PreserveNullAndEmpty(t *testing.T) {
 		{"_id": 2, "orders": []interface{}{}}, // empty array
 		{"_id": 3, "orders": nil},             // null
 	}
-	out, err := applyPipeline(docs, []bson.M{{"$unwind": bson.M{"path": "$orders", "preserveNullAndEmptyArrays": true}}})
+	out, err := ApplyPipeline(docs, []bson.M{{"$unwind": bson.M{"path": "$orders", "preserveNullAndEmptyArrays": true}}})
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 3 {
 		t.Fatalf("expected 3 docs, got %d", len(out))
@@ -313,9 +313,9 @@ func TestApplyPipeline_Unwind_NestedPath(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "orders": bson.M{"items": []interface{}{"a", "b"}}},
 	}
-	out, err := applyPipeline(docs, []bson.M{{"$unwind": "$orders.items"}})
+	out, err := ApplyPipeline(docs, []bson.M{{"$unwind": "$orders.items"}})
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 2 {
 		t.Fatalf("expected 2 docs, got %d", len(out))
@@ -335,9 +335,9 @@ func TestApplyPipeline_Unwind_TypedSlices(t *testing.T) {
 		docs := []bson.M{
 			{"_id": 1, "orders": []bson.M{{"id": 10}, {"id": 11}}},
 		}
-		out, err := applyPipeline(docs, []bson.M{{"$unwind": "$orders"}})
+		out, err := ApplyPipeline(docs, []bson.M{{"$unwind": "$orders"}})
 		if err != nil {
-			t.Fatalf("applyPipeline err: %v", err)
+			t.Fatalf("ApplyPipeline err: %v", err)
 		}
 		if len(out) != 2 {
 			t.Fatalf("expected 2 docs, got %d", len(out))
@@ -357,9 +357,9 @@ func TestApplyPipeline_Unwind_TypedSlices(t *testing.T) {
 		docs := []bson.M{
 			{"_id": 1, "nums": []int{1, 2}},
 		}
-		out, err := applyPipeline(docs, []bson.M{{"$unwind": "$nums"}})
+		out, err := ApplyPipeline(docs, []bson.M{{"$unwind": "$nums"}})
 		if err != nil {
-			t.Fatalf("applyPipeline err: %v", err)
+			t.Fatalf("ApplyPipeline err: %v", err)
 		}
 		if len(out) != 2 {
 			t.Fatalf("expected 2 docs, got %d", len(out))
@@ -377,9 +377,9 @@ func TestApplyPipeline_Unwind_TypedSlices(t *testing.T) {
 		docs := []bson.M{
 			{"_id": 1, "orders": "x"},
 		}
-		out, err := applyPipeline(docs, []bson.M{{"$unwind": "$orders"}})
+		out, err := ApplyPipeline(docs, []bson.M{{"$unwind": "$orders"}})
 		if err != nil {
-			t.Fatalf("applyPipeline err: %v", err)
+			t.Fatalf("ApplyPipeline err: %v", err)
 		}
 		if len(out) != 1 || out[0]["orders"] != "x" {
 			t.Fatalf("unexpected out: %#v", out)
@@ -401,9 +401,9 @@ func TestApplyPipeline_AddFields_FieldRef_NestedAndMissing(t *testing.T) {
 		}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if docs[0]["address"].(bson.M)["city"] != "NY" {
 		t.Fatalf("expected original docs not mutated, got %#v", docs[0]["address"])
@@ -444,9 +444,9 @@ func TestApplyPipeline_AddFields_Size(t *testing.T) {
 		}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 
 	if out[0]["arrLen"] != int64(3) {
@@ -487,9 +487,9 @@ func TestApplyPipeline_AddFields_CondIsArraySize(t *testing.T) {
 		}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if out[0]["itemCount"] != int64(2) {
 		t.Fatalf("expected itemCount=2, got %#v", out[0]["itemCount"])
@@ -519,9 +519,9 @@ func TestApplyPipeline_SetStage_AliasOfAddFields(t *testing.T) {
 		{"$set": bson.M{"city": "$_id"}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 2 {
 		t.Fatalf("expected 2 docs, got %d", len(out))
@@ -545,9 +545,9 @@ func TestApplyPipeline_Match_NestedComparison(t *testing.T) {
 		{"$match": bson.M{"orders.amount": bson.M{"$gte": 200}}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 1 || out[0]["_id"] != 1 {
 		t.Fatalf("unexpected out: %#v", out)
@@ -566,9 +566,9 @@ func TestApplyPipeline_AddFieldsThenMatch_Comparison(t *testing.T) {
 		{"$match": bson.M{"order_amount": bson.M{"$gte": 200}}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 2 || out[0]["_id"] != 1 || out[1]["_id"] != 3 {
 		t.Fatalf("unexpected out: %#v", out)
@@ -585,9 +585,9 @@ func TestApplyPipeline_Group_AddToSet(t *testing.T) {
 		{"$group": bson.M{"_id": nil, "users": bson.M{"$addToSet": "$user_id"}}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 1 {
 		t.Fatalf("expected 1 doc, got %d", len(out))
@@ -615,9 +615,9 @@ func TestApplyPipeline_Sample(t *testing.T) {
 		{"_id": 3},
 	}
 
-	out, err := applyPipeline(docs, []bson.M{{"$sample": bson.M{"size": 1}}})
+	out, err := ApplyPipeline(docs, []bson.M{{"$sample": bson.M{"size": 1}}})
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 1 {
 		t.Fatalf("expected 1 doc, got %d", len(out))
@@ -627,17 +627,17 @@ func TestApplyPipeline_Sample(t *testing.T) {
 		t.Fatalf("unexpected sampled doc: %#v", out[0])
 	}
 
-	out, err = applyPipeline(docs, []bson.M{{"$sample": bson.M{"size": 0}}})
+	out, err = ApplyPipeline(docs, []bson.M{{"$sample": bson.M{"size": 0}}})
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 0 {
 		t.Fatalf("expected 0 docs, got %d", len(out))
 	}
 
-	out, err = applyPipeline(docs, []bson.M{{"$sample": bson.M{"size": 10}}})
+	out, err = ApplyPipeline(docs, []bson.M{{"$sample": bson.M{"size": 10}}})
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 3 {
 		t.Fatalf("expected 3 docs, got %d", len(out))
@@ -653,9 +653,9 @@ func TestApplyPipeline_ProjectYear(t *testing.T) {
 		{"$project": bson.M{"_id": 1, "y": bson.M{"$year": "$created_at"}, "m": bson.M{"$month": "$created_at"}}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if out[0]["y"] != int64(2026) {
 		t.Fatalf("expected y=2026, got %#v", out[0]["y"])
@@ -695,9 +695,9 @@ func TestApplyPipeline_Facet(t *testing.T) {
 		},
 	}}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	if len(out) != 1 {
 		t.Fatalf("expected 1 doc, got %d", len(out))
@@ -741,9 +741,9 @@ func TestApplyPipeline_SetWindowFields_AvgAndRank(t *testing.T) {
 		},
 	}}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 
 	byID := map[interface{}]bson.M{}
@@ -801,9 +801,9 @@ func TestApplyPipeline_GraphLookup_ManagerChain(t *testing.T) {
 		},
 	}}
 
-	out, err := applyPipelineWithLookup(base, pipeline, resolver)
+	out, err := ApplyPipelineWithLookup(base, pipeline, resolver)
 	if err != nil {
-		t.Fatalf("applyPipelineWithLookup err: %v", err)
+		t.Fatalf("ApplyPipelineWithLookup err: %v", err)
 	}
 	if len(out) != 1 {
 		t.Fatalf("expected 1 doc, got %d", len(out))
@@ -888,9 +888,9 @@ func TestApplyPipeline_Project_ArithmeticStringBoolArrayDate(t *testing.T) {
 		}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	got := out[0]
 
@@ -1008,9 +1008,9 @@ func TestApplyPipeline_Project_Phase2_MapFilterReduceSortZipRegexSubstrDate(t *t
 		}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	got := out[0]
 
@@ -1063,9 +1063,9 @@ func TestApplyPipeline_SetWindowFields_DenseRank_DocNum_Shift(t *testing.T) {
 			},
 		},
 	}}
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	byID := map[interface{}]bson.M{}
 	for _, d := range out {
@@ -1135,9 +1135,9 @@ func TestApplyPipeline_Project_Phase3_ObjectConvertRegexFindDatePartsIsoIndexOfA
 		}},
 	}
 
-	out, err := applyPipeline(docs, pipeline)
+	out, err := ApplyPipeline(docs, pipeline)
 	if err != nil {
-		t.Fatalf("applyPipeline err: %v", err)
+		t.Fatalf("ApplyPipeline err: %v", err)
 	}
 	got := out[0]
 

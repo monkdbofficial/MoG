@@ -1,4 +1,4 @@
-package agg
+package pipeline
 
 import "gopkg.in/mgo.v2/bson"
 
@@ -11,6 +11,22 @@ type LookupResolver func(from string) ([]bson.M, error)
 // ApplyPipeline applies an aggregation pipeline to in-memory documents.
 func ApplyPipeline(docs []bson.M, pipeline []bson.M) ([]bson.M, error) {
 	return applyPipeline(docs, pipeline)
+}
+
+// CoerceBsonM converts common BSON/JSON representations into a bson.M.
+func CoerceBsonM(v interface{}) (bson.M, bool) {
+	return coerceBsonM(v)
+}
+
+// DocHasOperatorKeys reports whether m contains any "$"-prefixed keys.
+func DocHasOperatorKeys(m bson.M) bool {
+	return docHasOperatorKeys(m)
+}
+
+// CoerceInterfaceSlice attempts to view v as a slice/array of interface{} while
+// avoiding treating raw bytes as an array for MongoDB-like semantics.
+func CoerceInterfaceSlice(v interface{}) ([]interface{}, bool) {
+	return coerceInterfaceSlice(v)
 }
 
 // ApplyPipelineWithLookup applies an aggregation pipeline to in-memory documents and
@@ -57,6 +73,11 @@ func GetPathValue(doc bson.M, path string) interface{} {
 // SetPathValue sets a dotted path within doc, creating intermediate objects as needed.
 func SetPathValue(doc bson.M, path string, value interface{}) {
 	setPathValue(doc, path, value)
+}
+
+// UnsetPathValue deletes a dotted path from doc if present.
+func UnsetPathValue(doc bson.M, path string) {
+	unsetPathValue(doc, path)
 }
 
 // DeepCloneDoc recursively clones a bson.M.

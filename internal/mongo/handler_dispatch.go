@@ -13,10 +13,12 @@ import (
 
 	"mog/internal/logging"
 	"mog/internal/metrics"
+	mpipeline "mog/internal/mongo/pipeline"
+	mwire "mog/internal/mongo/wire"
 )
 
 // MongoDB wire-protocol dispatch and command handling.
-func (h *Handler) Handle(ctx context.Context, header MsgHeader, body []byte) ([]byte, error) {
+func (h *Handler) Handle(ctx context.Context, header mwire.MsgHeader, body []byte) ([]byte, error) {
 	var response []byte
 	var err error
 	switch header.OpCode {
@@ -43,8 +45,8 @@ func (h *Handler) Handle(ctx context.Context, header MsgHeader, body []byte) ([]
 	}
 }
 
-func (h *Handler) handleMsg(ctx context.Context, header MsgHeader, body []byte) ([]byte, error) {
-	op, err := ParseOpMsg(header, body)
+func (h *Handler) handleMsg(ctx context.Context, header mwire.MsgHeader, body []byte) ([]byte, error) {
+	op, err := mwire.ParseOpMsg(header, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read OpMsg: %w", err)
 	}
@@ -53,7 +55,7 @@ func (h *Handler) handleMsg(ctx context.Context, header MsgHeader, body []byte) 
 		return nil, fmt.Errorf("OpMsg must have at least one section")
 	}
 
-	bodySection, ok := op.Sections[0].(SectionBody)
+	bodySection, ok := op.Sections[0].(mwire.SectionBody)
 	if !ok {
 		return nil, fmt.Errorf("first section must be Kind 0 (BSON Body)")
 	}
@@ -66,7 +68,7 @@ func (h *Handler) handleMsg(ctx context.Context, header MsgHeader, body []byte) 
 	// Merge document sequences (kind 1 sections) into the command document so existing handlers
 	// can keep reading cmd["documents"], cmd["updates"], etc.
 	for _, sec := range op.Sections[1:] {
-		seq, ok := sec.(SectionDocumentSequence)
+		seq, ok := sec.(mwire.SectionDocumentSequence)
 		if !ok {
 			continue
 		}
@@ -85,9 +87,9 @@ func (h *Handler) handleMsg(ctx context.Context, header MsgHeader, body []byte) 
 	return h.handleOpMsgCommand(ctx, op, cmd)
 }
 
-func (h *Handler) handleQuery(ctx context.Context, header MsgHeader, body []byte) ([]byte, error) {
+func (h *Handler) handleQuery(ctx context.Context, header mwire.MsgHeader, body []byte) ([]byte, error) {
 	start := time.Now()
-	op, err := ParseOpQuery(header, body)
+	op, err := mwire.ParseOpQuery(header, body)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read OpQuery: %w", err)
 	}
@@ -261,7 +263,7 @@ func (h *Handler) handleQuery(ctx context.Context, header MsgHeader, body []byte
 	return h.newReplyError(op.Header.RequestID, 59, "CommandNotFound", fmt.Sprintf("unsupported command in OpQuery: %v", cmd))
 }
 
-func (h *Handler) handleOpMsgCommand(ctx context.Context, op *OpMsg, cmd bson.M) ([]byte, error) {
+func (h *Handler) handleOpMsgCommand(ctx context.Context, op *mwire.OpMsg, cmd bson.M) ([]byte, error) {
 	start := time.Now()
 	cmdName := primaryCommandKey(cmd)
 	defer func() {
@@ -768,13 +770,13 @@ func (h *Handler) handleOpMsgCommand(ctx context.Context, op *OpMsg, cmd bson.M)
 		}
 		limit := 0
 		if rawLimit, ok := cmd["limit"]; ok {
-			if i, err := asInt(rawLimit); err == nil {
+			if i, err := mpipeline.AsInt(rawLimit); err == nil {
 				limit = i
 			}
 		}
 		skip := 0
 		if rawSkip, ok := cmd["skip"]; ok {
-			if i, err := asInt(rawSkip); err == nil {
+			if i, err := mpipeline.AsInt(rawSkip); err == nil {
 				skip = i
 			}
 		}
@@ -831,10 +833,10 @@ func (h *Handler) handleOpMsgCommand(ctx context.Context, op *OpMsg, cmd bson.M)
 			}
 			docs = baseDocs
 			if len(filter) > 0 {
-				docs = applyMatch(docs, filter)
+				docs = mpipeline.ApplyMatch(docs, filter)
 			}
 			if len(sortSpec) > 0 {
-				docs = applySort(docs, sortSpec)
+				docs = mpipeline.ApplySort(docs, sortSpec)
 			}
 			if skip > 0 {
 				if skip >= len(docs) {
@@ -847,7 +849,7 @@ func (h *Handler) handleOpMsgCommand(ctx context.Context, op *OpMsg, cmd bson.M)
 				docs = docs[:limit]
 			}
 		} else if needPostFilter && len(filter) > 0 {
-			docs = applyMatch(docs, filter)
+			docs = mpipeline.ApplyMatch(docs, filter)
 		}
 		for _, d := range docs {
 			normalizeDocForReply(d)
@@ -930,7 +932,7 @@ func (h *Handler) handleOpMsgCommand(ctx context.Context, op *OpMsg, cmd bson.M)
 							for _, pd := range pdocs {
 								baseDocs = append(baseDocs, pd.doc)
 							}
-							baseDocs = applyMatch(baseDocs, query)
+							baseDocs = mpipeline.ApplyMatch(baseDocs, query)
 							n = int64(len(baseDocs))
 							goto countDone
 						}
@@ -941,7 +943,7 @@ func (h *Handler) handleOpMsgCommand(ctx context.Context, op *OpMsg, cmd bson.M)
 			if err != nil {
 				return nil, err
 			}
-			baseDocs = applyMatch(baseDocs, query)
+			baseDocs = mpipeline.ApplyMatch(baseDocs, query)
 			n = int64(len(baseDocs))
 		}
 	countDone:
@@ -1228,7 +1230,7 @@ func (h *Handler) handleOpMsgCommand(ctx context.Context, op *OpMsg, cmd bson.M)
 
 			limit := 0
 			if rawLimit, ok := deleteDoc["limit"]; ok {
-				if i, err := asInt(rawLimit); err == nil {
+				if i, err := mpipeline.AsInt(rawLimit); err == nil {
 					limit = i
 				}
 			}
@@ -1239,7 +1241,7 @@ func (h *Handler) handleOpMsgCommand(ctx context.Context, op *OpMsg, cmd bson.M)
 			}
 			var delIDs []string
 			for _, pd := range pdocs {
-				if matchDoc(pd.doc, filter) {
+				if mpipeline.MatchDoc(pd.doc, filter) {
 					delIDs = append(delIDs, pd.docID)
 					if limit == 1 {
 						break
@@ -1327,7 +1329,7 @@ func (h *Handler) handleOpMsgCommand(ctx context.Context, op *OpMsg, cmd bson.M)
 			return docs, nil
 		}
 
-		outDocs, err := applyPipelineWithLookup(baseDocs, pipelineDocs, resolveLookup)
+		outDocs, err := mpipeline.ApplyPipelineWithLookup(baseDocs, pipelineDocs, resolveLookup)
 		if err != nil {
 			return nil, err
 		}

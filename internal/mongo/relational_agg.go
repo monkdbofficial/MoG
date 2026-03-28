@@ -6,6 +6,8 @@ import (
 	"strings"
 
 	"gopkg.in/mgo.v2/bson"
+
+	mpipeline "mog/internal/mongo/pipeline"
 )
 
 type relationalAggPlan struct {
@@ -105,7 +107,7 @@ func buildRelationalAggPrefixPlan(physical string, pipeline []bson.M) (*relation
 				return nil, false, nil
 			}
 			if sumArg, ok := acc["$sum"]; ok {
-				if isNumericOne(sumArg) {
+				if mpipeline.IsNumericOne(sumArg) {
 					selectParts = append(selectParts, fmt.Sprintf("COUNT(*) AS %s", outField))
 					fields = append(fields, outField)
 					continue

@@ -7,6 +7,8 @@ import (
 	"time"
 
 	"gopkg.in/mgo.v2/bson"
+
+	mpipeline "mog/internal/mongo/pipeline"
 )
 
 func sqlTypeForValue(v interface{}) string {
@@ -47,7 +49,7 @@ func coerceFloat64Slice(arr []interface{}) ([]float64, bool) {
 		if el == nil {
 			return nil, false
 		}
-		f, ok := toFloat64Match(el)
+		f, ok := mpipeline.ToFloat64Match(el)
 		if !ok {
 			return nil, false
 		}
