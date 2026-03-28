@@ -26,4 +26,3 @@ func RemoteAddr(ctx context.Context) string {
 	}
 	return ""
 }
-
