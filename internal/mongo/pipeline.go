@@ -177,6 +177,37 @@ func applyPipelineWithLookup(docs []bson.M, pipeline []bson.M, resolve lookupRes
 			if err != nil {
 				return nil, err
 			}
+		case stage["$replaceRoot"] != nil:
+			spec, ok := coerceBsonM(stage["$replaceRoot"])
+			if !ok {
+				return nil, fmt.Errorf("$replaceRoot stage must be a document")
+			}
+			var err error
+			out, err = applyReplaceRoot(out, spec)
+			if err != nil {
+				return nil, err
+			}
+		case stage["$replaceWith"] != nil:
+			var err error
+			out, err = applyReplaceWith(out, stage["$replaceWith"])
+			if err != nil {
+				return nil, err
+			}
+		case stage["$sortByCount"] != nil:
+			var err error
+			out, err = applySortByCount(out, stage["$sortByCount"])
+			if err != nil {
+				return nil, err
+			}
+		case stage["$unionWith"] != nil:
+			if resolve == nil {
+				return nil, fmt.Errorf("$unionWith requires resolver")
+			}
+			var err error
+			out, err = applyUnionWith(out, stage["$unionWith"], resolve)
+			if err != nil {
+				return nil, err
+			}
 		default:
 			return nil, fmt.Errorf("unsupported aggregation stage: %v", stage)
 		}
@@ -184,6 +215,118 @@ func applyPipelineWithLookup(docs []bson.M, pipeline []bson.M, resolve lookupRes
 	for _, d := range out {
 		delete(d, mogVectorSearchScoreKey)
 	}
+	return out, nil
+}
+
+func applyReplaceRoot(docs []bson.M, spec bson.M) ([]bson.M, error) {
+	newRoot, ok := spec["newRoot"]
+	if !ok {
+		return nil, fmt.Errorf("$replaceRoot requires newRoot")
+	}
+	return applyReplaceWith(docs, newRoot)
+}
+
+func applyReplaceWith(docs []bson.M, expr interface{}) ([]bson.M, error) {
+	out := make([]bson.M, 0, len(docs))
+	for _, d := range docs {
+		opts := evalOpts{sizeNonArrayZero: false, vars: map[string]interface{}{"ROOT": d, "CURRENT": d}}
+		v, err := evalComputedWithOpts(d, expr, opts)
+		if err != nil {
+			return nil, err
+		}
+		m, ok := coerceBsonM(v)
+		if !ok || m == nil {
+			return nil, fmt.Errorf("$replaceWith must evaluate to a document")
+		}
+		nd := bson.M{}
+		for k, vv := range m {
+			nd[k] = vv
+		}
+		out = append(out, nd)
+	}
+	return out, nil
+}
+
+func applySortByCount(docs []bson.M, expr interface{}) ([]bson.M, error) {
+	type state struct {
+		key interface{}
+		n   int64
+	}
+	byKey := map[string]*state{}
+	order := []string{}
+	for _, d := range docs {
+		opts := evalOpts{sizeNonArrayZero: false, vars: map[string]interface{}{"ROOT": d, "CURRENT": d}}
+		k, err := evalComputedWithOpts(d, expr, opts)
+		if err != nil {
+			return nil, err
+		}
+		sk := fmt.Sprintf("%T:%v", k, k)
+		st := byKey[sk]
+		if st == nil {
+			st = &state{key: k}
+			byKey[sk] = st
+			order = append(order, sk)
+		}
+		st.n++
+	}
+	out := make([]bson.M, 0, len(order))
+	for _, sk := range order {
+		st := byKey[sk]
+		out = append(out, bson.M{"_id": st.key, "count": st.n})
+	}
+	out = applySort(out, bson.M{"count": -1})
+	return out, nil
+}
+
+func applyUnionWith(docs []bson.M, raw interface{}, resolve lookupResolver) ([]bson.M, error) {
+	coll := ""
+	var pipeline []bson.M
+
+	switch t := raw.(type) {
+	case string:
+		coll = t
+	default:
+		spec, ok := coerceBsonM(raw)
+		if !ok {
+			return nil, fmt.Errorf("$unionWith must be a string or document")
+		}
+		if c, ok := spec["coll"].(string); ok {
+			coll = c
+		} else if c, ok := spec["from"].(string); ok {
+			coll = c
+		}
+		if rawPipe, ok := spec["pipeline"]; ok && rawPipe != nil {
+			arr, ok := coerceInterfaceSlice(rawPipe)
+			if !ok {
+				return nil, fmt.Errorf("$unionWith.pipeline must be an array")
+			}
+			for _, st := range arr {
+				m, ok := coerceBsonM(st)
+				if !ok {
+					return nil, fmt.Errorf("$unionWith.pipeline stage must be a document")
+				}
+				pipeline = append(pipeline, m)
+			}
+		}
+	}
+	if coll == "" {
+		return nil, fmt.Errorf("$unionWith requires coll")
+	}
+
+	foreign, err := resolve(coll)
+	if err != nil {
+		return nil, err
+	}
+	unionDocs := foreign
+	if len(pipeline) > 0 {
+		unionDocs, err = applyPipelineWithLookup(cloneDocsShallow(foreign), pipeline, resolve)
+		if err != nil {
+			return nil, err
+		}
+	}
+	out := make([]bson.M, 0, len(docs)+len(unionDocs))
+	out = append(out, docs...)
+	out = append(out, unionDocs...)
 	return out, nil
 }
 
@@ -1343,7 +1486,7 @@ func applyProject(docs []bson.M, proj bson.M) ([]bson.M, error) {
 			}
 		}
 		for k, expr := range computed {
-			val, err := evalComputedWithOpts(d, expr, evalOpts{sizeNonArrayZero: true})
+			val, err := evalComputedWithOpts(d, expr, evalOpts{sizeNonArrayZero: true, vars: map[string]interface{}{"ROOT": d, "CURRENT": d}})
 			if err != nil {
 				return nil, err
 			}
@@ -1383,7 +1526,7 @@ func applyAddFields(docs []bson.M, spec bson.M) ([]bson.M, error) {
 }
 
 func evalAddFieldsValue(doc bson.M, expr interface{}) (interface{}, error) {
-	return evalComputedWithOpts(doc, expr, evalOpts{sizeNonArrayZero: false})
+	return evalComputedWithOpts(doc, expr, evalOpts{sizeNonArrayZero: false, vars: map[string]interface{}{"ROOT": doc, "CURRENT": doc}})
 }
 
 func isArrayValue(v interface{}) bool {
@@ -1443,6 +1586,24 @@ func isTruthy(v interface{}) bool {
 }
 
 func evalValue(doc bson.M, v interface{}) (interface{}, error) {
+	if s, ok := v.(string); ok && strings.HasPrefix(s, "$$") {
+		key := strings.TrimPrefix(s, "$$")
+		varName := key
+		rest := ""
+		if i := strings.IndexByte(key, '.'); i >= 0 {
+			varName = key[:i]
+			rest = key[i+1:]
+		}
+		switch varName {
+		case "ROOT", "CURRENT":
+			if rest == "" {
+				return doc, nil
+			}
+			return getPathValue(doc, rest), nil
+		default:
+			return nil, nil
+		}
+	}
 	if s, ok := v.(string); ok && len(s) > 1 && s[0] == '$' {
 		f := s[1:]
 		return getPathValue(doc, f), nil
@@ -1493,6 +1654,8 @@ func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interfac
 				// Misc
 				case "$literal":
 					return arg, nil
+				case "$rand":
+					return rand.Float64(), nil
 				case "$meta":
 					if s, ok := arg.(string); ok {
 						switch s {
@@ -1626,6 +1789,30 @@ func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interfac
 						return evalComputedWithOpts(doc, def, opts)
 					}
 					return nil, nil
+				case "$let":
+					spec, ok := coerceBsonM(arg)
+					if !ok {
+						return nil, fmt.Errorf("$let must be a document")
+					}
+					rawVars, okV := spec["vars"]
+					inExpr, okIn := spec["in"]
+					if !okV || !okIn {
+						return nil, fmt.Errorf("$let requires vars/in")
+					}
+					varsDoc, ok := coerceBsonM(rawVars)
+					if !ok {
+						return nil, fmt.Errorf("$let.vars must be a document")
+					}
+					child := opts
+					child.vars = cloneVars(opts.vars)
+					for name, raw := range varsDoc {
+						v, err := evalComputedWithOpts(doc, raw, opts)
+						if err != nil {
+							return nil, err
+						}
+						child.vars[name] = v
+					}
+					return evalComputedWithOpts(doc, inExpr, child)
 
 				// Comparison
 				case "$cmp":
@@ -1692,6 +1879,36 @@ func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interfac
 						return anyIn(arr, list), nil
 					}
 					return scalarIn(args[0], list), nil
+				case "$allElementsTrue":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					arr, ok := coerceInterfaceSlice(v)
+					if !ok {
+						return nil, nil
+					}
+					for _, el := range arr {
+						if !isTruthy(el) {
+							return false, nil
+						}
+					}
+					return true, nil
+				case "$anyElementTrue":
+					v, err := evalComputedWithOpts(doc, arg, opts)
+					if err != nil {
+						return nil, err
+					}
+					arr, ok := coerceInterfaceSlice(v)
+					if !ok {
+						return nil, nil
+					}
+					for _, el := range arr {
+						if isTruthy(el) {
+							return true, nil
+						}
+					}
+					return false, nil
 				case "$arrayElemAt":
 					args, err := evalArrayArgs(doc, arg, 2, opts)
 					if err != nil {
@@ -1850,6 +2067,139 @@ func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interfac
 						}
 					}
 					return out, nil
+				case "$setUnion":
+					args, err := evalArrayArgs(doc, arg, 1, opts)
+					if err != nil {
+						return nil, err
+					}
+					seen := map[string]struct{}{}
+					out := []interface{}{}
+					for _, a := range args {
+						arr, ok := coerceInterfaceSlice(a)
+						if !ok {
+							return nil, nil
+						}
+						for _, el := range arr {
+							k := fmt.Sprint(el)
+							if _, ok := seen[k]; ok {
+								continue
+							}
+							seen[k] = struct{}{}
+							out = append(out, el)
+						}
+					}
+					return out, nil
+				case "$setIntersection":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					a0, ok := coerceInterfaceSlice(args[0])
+					if !ok {
+						return nil, nil
+					}
+					cur := map[string]interface{}{}
+					for _, el := range a0 {
+						cur[fmt.Sprint(el)] = el
+					}
+					for _, a := range args[1:] {
+						arr, ok := coerceInterfaceSlice(a)
+						if !ok {
+							return nil, nil
+						}
+						next := map[string]interface{}{}
+						for _, el := range arr {
+							k := fmt.Sprint(el)
+							if v, ok := cur[k]; ok {
+								next[k] = v
+							}
+						}
+						cur = next
+					}
+					out := []interface{}{}
+					for _, v := range cur {
+						out = append(out, v)
+					}
+					sort.SliceStable(out, func(i, j int) bool { return fmt.Sprint(out[i]) < fmt.Sprint(out[j]) })
+					return out, nil
+				case "$setDifference":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					a0, ok := coerceInterfaceSlice(args[0])
+					if !ok {
+						return nil, nil
+					}
+					a1, ok := coerceInterfaceSlice(args[1])
+					if !ok {
+						return nil, nil
+					}
+					rm := map[string]struct{}{}
+					for _, el := range a1 {
+						rm[fmt.Sprint(el)] = struct{}{}
+					}
+					out := []interface{}{}
+					for _, el := range a0 {
+						if _, ok := rm[fmt.Sprint(el)]; ok {
+							continue
+						}
+						out = append(out, el)
+					}
+					return out, nil
+				case "$setEquals":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					a0, ok := coerceInterfaceSlice(args[0])
+					if !ok {
+						return nil, nil
+					}
+					a1, ok := coerceInterfaceSlice(args[1])
+					if !ok {
+						return nil, nil
+					}
+					m0 := map[string]struct{}{}
+					m1 := map[string]struct{}{}
+					for _, el := range a0 {
+						m0[fmt.Sprint(el)] = struct{}{}
+					}
+					for _, el := range a1 {
+						m1[fmt.Sprint(el)] = struct{}{}
+					}
+					if len(m0) != len(m1) {
+						return false, nil
+					}
+					for k := range m0 {
+						if _, ok := m1[k]; !ok {
+							return false, nil
+						}
+					}
+					return true, nil
+				case "$setIsSubset":
+					args, err := evalArrayArgs(doc, arg, 2, opts)
+					if err != nil {
+						return nil, err
+					}
+					a0, ok := coerceInterfaceSlice(args[0])
+					if !ok {
+						return nil, nil
+					}
+					a1, ok := coerceInterfaceSlice(args[1])
+					if !ok {
+						return nil, nil
+					}
+					sup := map[string]struct{}{}
+					for _, el := range a1 {
+						sup[fmt.Sprint(el)] = struct{}{}
+					}
+					for _, el := range a0 {
+						if _, ok := sup[fmt.Sprint(el)]; !ok {
+							return false, nil
+						}
+					}
+					return true, nil
 
 				case "$map":
 					spec, ok := coerceBsonM(arg)
@@ -2097,11 +2447,34 @@ func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interfac
 					if err != nil {
 						return nil, err
 					}
-					sum := 0.0
+					// Best-effort date compatibility: if exactly one argument is a date,
+					// treat other numeric args as milliseconds and return a date.
+					var haveDate bool
+					var base time.Time
+					ms := 0.0
 					for _, a := range args {
 						if a == nil {
 							return nil, nil
 						}
+						if tm, ok := coerceExplicitTime(a); ok {
+							if haveDate {
+								return nil, fmt.Errorf("$add supports at most one date")
+							}
+							haveDate = true
+							base = tm.UTC()
+							continue
+						}
+						f, ok := toFloat64(a)
+						if !ok {
+							return nil, nil
+						}
+						ms += f
+					}
+					if haveDate {
+						return base.Add(time.Duration(int64(ms * float64(time.Millisecond)))), nil
+					}
+					sum := 0.0
+					for _, a := range args {
 						f, ok := toFloat64(a)
 						if !ok {
 							return nil, nil
@@ -2114,8 +2487,22 @@ func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interfac
 					if err != nil {
 						return nil, err
 					}
+					if args[0] == nil || args[1] == nil {
+						return nil, nil
+					}
+					if at, ok := coerceExplicitTime(args[0]); ok {
+						at = at.UTC()
+						if bt, ok := coerceExplicitTime(args[1]); ok {
+							return int64(at.Sub(bt.UTC()).Milliseconds()), nil
+						}
+						ms, ok := toFloat64(args[1])
+						if !ok {
+							return nil, nil
+						}
+						return at.Add(-time.Duration(int64(ms * float64(time.Millisecond)))), nil
+					}
 					a, ok := toFloat64(args[0])
-					if !ok || args[0] == nil || args[1] == nil {
+					if !ok {
 						return nil, nil
 					}
 					b, ok := toFloat64(args[1])
@@ -2677,7 +3064,11 @@ func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interfac
 					if !ok {
 						return nil, nil
 					}
-					amt, ok := toInt64IfIntegral(rawAmt)
+					amtVal, err := evalComputedWithOpts(doc, rawAmt, opts)
+					if err != nil {
+						return nil, err
+					}
+					amt, ok := toInt64IfIntegral(amtVal)
 					if !ok {
 						return nil, nil
 					}
@@ -2905,6 +3296,14 @@ func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interfac
 						return int64(d / time.Hour), nil
 					case "day":
 						return int64(d / (24 * time.Hour)), nil
+					case "week":
+						return int64(d / (7 * 24 * time.Hour)), nil
+					case "month":
+						return dateDiffMonths(st, et), nil
+					case "quarter":
+						return dateDiffMonths(st, et) / 3, nil
+					case "year":
+						return dateDiffYears(st, et), nil
 					default:
 						return nil, fmt.Errorf("$dateDiff unsupported unit: %s", unit)
 					}
@@ -3309,6 +3708,45 @@ func mongoWeek(t time.Time) int {
 	return 1 + (days / 7)
 }
 
+func dateDiffMonths(start, end time.Time) int64 {
+	start = start.UTC()
+	end = end.UTC()
+	sign := int64(1)
+	if end.Before(start) {
+		start, end = end, start
+		sign = -1
+	}
+	y1, m1, _ := start.Date()
+	y2, m2, _ := end.Date()
+	months := (y2-y1)*12 + int(m2-m1)
+	// Adjust using AddDate to approximate Mongo's "whole units" behavior.
+	for months > 0 && start.AddDate(0, months, 0).After(end) {
+		months--
+	}
+	for start.AddDate(0, months+1, 0).Before(end) || start.AddDate(0, months+1, 0).Equal(end) {
+		months++
+	}
+	return int64(months) * sign
+}
+
+func dateDiffYears(start, end time.Time) int64 {
+	start = start.UTC()
+	end = end.UTC()
+	sign := int64(1)
+	if end.Before(start) {
+		start, end = end, start
+		sign = -1
+	}
+	years := end.Year() - start.Year()
+	for years > 0 && start.AddDate(years, 0, 0).After(end) {
+		years--
+	}
+	for start.AddDate(years+1, 0, 0).Before(end) || start.AddDate(years+1, 0, 0).Equal(end) {
+		years++
+	}
+	return int64(years) * sign
+}
+
 func cloneVars(in map[string]interface{}) map[string]interface{} {
 	if in == nil {
 		return map[string]interface{}{}
@@ -3535,6 +3973,26 @@ func coerceTime(v interface{}) (time.Time, bool) {
 	}
 }
 
+func coerceExplicitTime(v interface{}) (time.Time, bool) {
+	if v == nil {
+		return time.Time{}, false
+	}
+	switch t := v.(type) {
+	case time.Time:
+		return t, true
+	case *time.Time:
+		if t == nil {
+			return time.Time{}, false
+		}
+		return *t, true
+	case bson.MongoTimestamp:
+		sec := int64(uint64(t) >> 32)
+		return time.Unix(sec, 0).UTC(), true
+	default:
+		return time.Time{}, false
+	}
+}
+
 type groupState struct {
 	id             interface{}
 	sum            map[string]float64
@@ -3547,6 +4005,11 @@ type groupState struct {
 	min            map[string]interface{}
 	maxSet         map[string]bool
 	minSet         map[string]bool
+	first          map[string]interface{}
+	firstSet       map[string]bool
+	last           map[string]interface{}
+	lastSet        map[string]bool
+	push           map[string][]interface{}
 	addToSetKeys   map[string]map[string]struct{}
 	addToSetVals   map[string][]interface{}
 }
@@ -3592,6 +4055,11 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				min:            map[string]interface{}{},
 				maxSet:         map[string]bool{},
 				minSet:         map[string]bool{},
+				first:          map[string]interface{}{},
+				firstSet:       map[string]bool{},
+				last:           map[string]interface{}{},
+				lastSet:        map[string]bool{},
+				push:           map[string][]interface{}{},
 				addToSetKeys:   map[string]map[string]struct{}{},
 				addToSetVals:   map[string][]interface{}{},
 			}
@@ -3684,6 +4152,35 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				}
 				continue
 			}
+			if firstArg, ok := acc["$first"]; ok {
+				if st.firstSet[outField] {
+					continue
+				}
+				val, err := evalValue(d, firstArg)
+				if err != nil {
+					return nil, err
+				}
+				st.first[outField] = deepClone(val)
+				st.firstSet[outField] = true
+				continue
+			}
+			if lastArg, ok := acc["$last"]; ok {
+				val, err := evalValue(d, lastArg)
+				if err != nil {
+					return nil, err
+				}
+				st.last[outField] = deepClone(val)
+				st.lastSet[outField] = true
+				continue
+			}
+			if pushArg, ok := acc["$push"]; ok {
+				val, err := evalValue(d, pushArg)
+				if err != nil {
+					return nil, err
+				}
+				st.push[outField] = append(st.push[outField], deepClone(val))
+				continue
+			}
 			return nil, fmt.Errorf("unsupported $group accumulator: %v", acc)
 		}
 	}
@@ -3719,6 +4216,18 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 			}
 			if st.minSet[outField] {
 				doc[outField] = st.min[outField]
+				continue
+			}
+			if st.firstSet[outField] {
+				doc[outField] = st.first[outField]
+				continue
+			}
+			if st.lastSet[outField] {
+				doc[outField] = st.last[outField]
+				continue
+			}
+			if vals, ok := st.push[outField]; ok {
+				doc[outField] = vals
 				continue
 			}
 			if st.sumOnlyIsFloat[outField] {

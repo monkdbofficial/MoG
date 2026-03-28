@@ -58,6 +58,42 @@ func TestApplyPipeline_ProjectMultiply(t *testing.T) {
 	}
 }
 
+func TestApplyPipeline_AddFields_DatePartsAndArithmetic(t *testing.T) {
+	t0 := time.Date(2024, time.March, 2, 3, 4, 5, 6*1_000_000, time.UTC)
+	docs := []bson.M{
+		{"_id": 1, "created_at": t0},
+	}
+	pipeline := []bson.M{
+		{"$addFields": bson.M{
+			"y":    bson.M{"$year": "$created_at"},
+			"m":    bson.M{"$month": "$created_at"},
+			"next": bson.M{"$add": []interface{}{"$created_at", int64(24 * 60 * 60 * 1000)}},
+			"diff": bson.M{"$subtract": []interface{}{bson.M{"$add": []interface{}{"$created_at", int64(1000)}}, "$created_at"}},
+		}},
+	}
+
+	out, err := applyPipeline(docs, pipeline)
+	if err != nil {
+		t.Fatalf("applyPipeline err: %v", err)
+	}
+	if out[0]["y"] != int64(2024) {
+		t.Fatalf("expected y=2024, got %#v", out[0]["y"])
+	}
+	if out[0]["m"] != int64(3) {
+		t.Fatalf("expected m=3, got %#v", out[0]["m"])
+	}
+	next, ok := out[0]["next"].(time.Time)
+	if !ok {
+		t.Fatalf("expected next to be time.Time, got %#v", out[0]["next"])
+	}
+	if !next.Equal(t0.Add(24 * time.Hour)) {
+		t.Fatalf("expected next=%v, got %v", t0.Add(24*time.Hour), next)
+	}
+	if out[0]["diff"] != int64(1000) {
+		t.Fatalf("expected diff=1000, got %#v", out[0]["diff"])
+	}
+}
+
 func TestApplyPipeline_ProjectSize(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "users": []interface{}{1, 2, 3}},
