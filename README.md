@@ -9,7 +9,7 @@
   <br>
   <img src="https://img.shields.io/badge/MonkDB-MoG-blue" alt="MonkDB MoG" />
   <img src="https://img.shields.io/badge/version-v0.1.0-green" alt="Version" />
-  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License" />
+  <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" />
   <img src="https://img.shields.io/badge/go-1.25.5-00ADD8" alt="Go" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs Welcome" />
   <br>
