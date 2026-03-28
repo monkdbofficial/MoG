@@ -9,7 +9,7 @@
   <br>
   <img src="https://img.shields.io/badge/MonkDB-MoG-blue" alt="MonkDB MoG" />
   <img src="https://img.shields.io/badge/version-v0.1.0-green" alt="Version" />
-  <img src="https://img.shields.io/badge/license-MIT-blue" alt="License" />
+    <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" />
   <img src="https://img.shields.io/badge/go-1.25.5-00ADD8" alt="Go" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs Welcome" />
   <br>
@@ -40,7 +40,9 @@ MoG is designed for teams that like MongoDB’s developer experience, but want M
 ## Table of Contents
 
 - [Key Features](#key-features)
+- [Version & Build Info](#version--build-info)
 - [Architecture](#architecture)
+- [Supported Features](#supported-features)
 - [Getting Started](#getting-started)
 - [Configuration](#configuration)
 - [Observability](#observability)
@@ -121,6 +123,45 @@ drivers)        │   │ :27017       │──────▶│ - OP_MSG deco
                                                           Prometheus scrapes
                                                           Grafana queries Prometheus
 ```
+
+## Supported Features
+
+MoG implements a growing subset of MongoDB features. While not yet 100% MongoDB-complete, it supports the core command surface needed for many applications.
+
+### Core Commands
+- **CRUD**: `find`, `insert`, `update`, `delete`, `count`
+- **Metadata**: `listDatabases`, `listCollections`, `collStats`, `dbStats`
+- **Collections**: `create`, `drop`, `dropDatabase`
+- **Indexes**: `listIndexes`, `createIndexes`, `dropIndexes`
+- **Auth**: `saslStart`, `saslContinue` (SCRAM-SHA-256)
+- **Other**: `ping`, `hello`, `serverStatus`, `buildInfo`, `getParameter`, `hostInfo`
+
+### Query & Update Operators
+- **Filters**: Equality, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`, `$in`
+- **Updates**: `$set`, `$inc`, replacement documents
+
+### Hybrid Aggregation Pipeline
+MoG uses a **hybrid aggregation engine**. It pushes the longest possible prefix down to SQL (leading `$match`, then optional `$group`, `$sort`, `$limit`, or `$count`) and evaluates remaining stages in memory (Go) for correctness.
+
+**Supported Stages:**
+- `$match`, `$project`, `$addFields`, `$set`, `$unset`
+- `$group`, `$sort`, `$limit`, `$sample`, `$count`
+- `$lookup`, `$unwind`, `$facet`, `$sortByCount`
+- `$graphLookup`, `$setWindowFields` (subset)
+- `$replaceRoot`, `$replaceWith`, `$unionWith`
+
+<details>
+<summary><b>Supported Pipeline Expressions (Click to expand)</b></summary>
+
+- **Arithmetic:** `$add`, `$subtract`, `$multiply`, `$divide`, `$mod`, `$abs`, `$ceil`, `$floor`, `$round`, `$trunc`, `$exp`, `$ln`, `$log`, `$log10`, `$pow`, `$sqrt`
+- **String:** `$concat`, `$split`, `$strLenBytes`, `$strLenCP`, `$toLower`, `$toUpper`, `$trim`, `$ltrim`, `$rtrim`, `$replaceAll`, `$replaceOne`, `$substr`, `$indexOfBytes`, `$indexOfCP`, `$regexMatch`, `$regexFind`, `$regexFindAll`, `$strcasecmp`
+- **Array:** `$arrayElemAt`, `$concatArrays`, `$first`, `$last`, `$in`, `$isArray`, `$range`, `$reverseArray`, `$size`, `$slice`, `$zip`, `$map`, `$filter`, `$sortArray`, `$allElementsTrue`, `$anyElementTrue`, `$reduce`
+- **Date:** `$toDate`, `$dayOfMonth`, `$dayOfWeek`, `$dayOfYear`, `$hour`, `$millisecond`, `$minute`, `$month`, `$second`, `$week`, `$year`, `$dateToString`, `$dateFromString`, `$dateTrunc`, `$dateAdd`, `$dateSubtract`, `$dateDiff`
+- **Comparison:** `$cmp`, `$eq`, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`
+- **Conditional:** `$cond`, `$ifNull`, `$switch`
+- **Type/Object:** `$convert`, `$type`, `$toBool`, `$toDouble`, `$toInt`, `$toLong`, `$toString`, `$getField`, `$setField`, `$unsetField`, `$mergeObjects`, `$objectToArray`, `$arrayToObject`
+- **Misc:** `$literal`, `$rand`, `$meta`, `$let`
+</details>
 
 ## Getting Started
 
@@ -212,12 +253,24 @@ If you discover a security vulnerability, please refer to [SECURITY.md](SECURITY
 
 ## License
 
-This project is licensed under the MIT License,  see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+
+## Citation
+
+If you use MoG (MonkDB Gateway) in your research or project, please cite it as follows:
+
+```bibtex
+@software{mog2026,
+  author = {MonkDB Team},
+  title = {MoG: High-performance MongoDB wire protocol proxy for MonkDB},
+  year = {2026},
+  url = {https://github.com/monkdbofficial/mog}
+}
+```
 
 ---
 
 <p align="center">
   Made with <img src="https://img.shields.io/badge/-%E2%9D%A4-red" alt="heart" /> by <b><a href="https://www.monkdb.com">MonkDB</a></b>
   <br>
-  <i>Empowering document-relational synergy.</i>
 </p>
