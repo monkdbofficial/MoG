@@ -1,0 +1,12 @@
+apiVersion: 1
+
+providers:
+  - name: mog
+    orgId: 1
+    folder: MoG
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /etc/grafana/dashboards
+

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+
+{% block content %}
+  {% set ancestors = page.ancestors | default([]) %}
+  {% if nav and nav.homepage and (ancestors or page.title) %}
+    <nav class="md-breadcrumbs" aria-label="Breadcrumbs">
+      <a class="md-breadcrumbs__link" href="{{ nav.homepage.url | url }}">{{ nav.homepage.title }}</a>
+      {% for a in (ancestors | reverse) %}
+        <span class="md-breadcrumbs__sep">›</span>
+        <a class="md-breadcrumbs__link" href="{{ a.url | url }}">{{ a.title }}</a>
+      {% endfor %}
+      <span class="md-breadcrumbs__sep">›</span>
+      <span class="md-breadcrumbs__current" aria-current="page">{{ page.title }}</span>
+    </nav>
+  {% endif %}
+
+  {{ super() }}
+{% endblock %}

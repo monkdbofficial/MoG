@@ -1,0 +1,10 @@
+global:
+  scrape_interval: 15s
+
+scrape_configs:
+  - job_name: mog
+    metrics_path: /metrics
+    static_configs:
+      # mog is running on the host (your terminal), Prometheus is in Docker.
+      # On macOS/Windows, containers can reach the host via host.docker.internal.
+      - targets: ["host.docker.internal:8080"]

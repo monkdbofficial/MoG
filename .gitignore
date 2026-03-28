@@ -1,0 +1,27 @@
+.DS_Store
+
+# Binaries
+mog
+main
+*.exe
+*.out
+
+# Go build/test
+/bin/
+/dist/
+*.test
+*.prof
+coverage.out
+
+# Local env
+.env
+.env.local
+
+# Python / docs tooling
+.venv/
+__pycache__/
+docs/site/
+
+# Editors
+.vscode/
+.idea/

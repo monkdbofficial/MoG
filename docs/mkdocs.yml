@@ -1,0 +1,121 @@
+docs_dir: src
+site_dir: site
+
+site_name: MoG Documentation
+site_description: MongoDB wire protocol proxy translating operations to MonkDB (MonkDB MoG)
+
+theme:
+  name: material
+  logo: imgs/monkdb_logo_v3.png
+  favicon: imgs/monkdb_logo_v3.png
+  custom_dir: overrides
+  font:
+    text: IBM Plex Sans
+    code: IBM Plex Mono
+  features:
+    - navigation.sections
+    - navigation.indexes
+    - navigation.path
+    - navigation.top
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: custom
+      accent: custom
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+
+nav:
+  - Overview: index.md
+  - Getting Started: getting-started.md
+  - Usage: usage.md
+  - Supported: supported.md
+  - Architecture: architecture.md
+  - How It Works: how-it-works.md
+  - Wire Protocol: wire-protocol.md
+  - MongoDB ↔ MonkDB Mappings: mappings.md
+  - Commands:
+      - Overview: commands/index.md
+      - Connection:
+          - hello / isMaster: commands/hello.md
+          - ping: commands/ping.md
+          - buildInfo: commands/buildinfo.md
+          - getParameter / FCV: commands/getparameter-fcv.md
+      - Auth:
+          - SCRAM (saslStart/continue): commands/auth-scram.md
+          - connectionStatus: commands/connectionstatus.md
+      - Introspection:
+          - hostInfo: commands/hostinfo.md
+          - serverStatus: commands/serverstatus.md
+          - getCmdLineOpts: commands/getcmdlineopts.md
+          - getLog: commands/getlog.md
+      - Catalog:
+          - listDatabases: commands/listdatabases.md
+          - listCollections: commands/listcollections.md
+          - indexes: commands/indexes.md
+      - DDL:
+          - create: commands/create.md
+          - drop: commands/drop.md
+          - dropDatabase: commands/dropdatabase.md
+          - stats: commands/collstats.md
+      - CRUD:
+          - find: commands/find.md
+          - count: commands/count.md
+          - insert: commands/insert.md
+          - update: commands/update.md
+          - delete: commands/delete.md
+      - Aggregation:
+          - aggregate: commands/aggregate.md
+      - Transactions: commands/transactions.md
+  - Aggregation:
+      - Overview: aggregation/index.md
+      - Stages:
+          - $match: aggregation/stage-match.md
+          - $project: aggregation/stage-project.md
+          - $addFields / $set: aggregation/stage-addfields.md
+          - $unset: aggregation/stage-unset.md
+          - $group: aggregation/stage-group.md
+          - $sort: aggregation/stage-sort.md
+          - $limit: aggregation/stage-limit.md
+          - $sample: aggregation/stage-sample.md
+          - $count: aggregation/stage-count.md
+          - $lookup: aggregation/stage-lookup.md
+          - $unwind: aggregation/stage-unwind.md
+      - Recipes (complex): aggregation/recipes.md
+  - Translation:
+      - CRUD: translation-crud.md
+      - Aggregation (overview): translation-aggregation.md
+      - Update Engine: translation-updates.md
+  - Configuration: configuration.md
+  - Observability: observability.md
+  - Performance: performance.md
+  - Deployment: deployment.md
+  - Limitations: limitations.md
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+  - tables
+  - fenced_code
+
+plugins:
+  - search
+
+extra_css:
+  - stylesheets/extra.css

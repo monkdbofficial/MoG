@@ -1,0 +1,105 @@
+/*
+MonkDB branding (Feb 2026)
+- Egyptian Blue: #0033AA
+- Dodger Blue:   #1E8AFF
+- Oxford Blue:   #1B365D
+- Powder Blue:   #B1C9E8
+- Parchment:     #F8F4F0
+- White:         #FFFFFF
+*/
+
+/* Light theme */
+[data-md-color-scheme="default"] {
+  /*
+  Keep a light header so the (blue) MonkDB logo stays visible.
+  */
+  --md-primary-fg-color: #f8f4f0; /* Parchment */
+  --md-primary-bg-color: #1b365d; /* Oxford Blue (text on header) */
+
+  --md-accent-fg-color: #1e8aff; /* Dodger Blue */
+  --md-accent-fg-color--transparent: rgba(30, 138, 255, 0.12);
+
+  --md-default-bg-color: #ffffff;
+  --md-typeset-a-color: #0033aa; /* Egyptian Blue */
+  --md-code-bg-color: rgba(177, 201, 232, 0.25); /* Powder Blue */
+  --md-code-fg-color: #1b365d;
+}
+
+/* Dark theme */
+[data-md-color-scheme="slate"] {
+  /*
+  Still keep the header light for logo visibility, but use a dark page background.
+  */
+  --md-primary-fg-color: #f8f4f0; /* Parchment */
+  --md-primary-bg-color: #1b365d;
+
+  --md-accent-fg-color: #1e8aff;
+  --md-accent-fg-color--transparent: rgba(30, 138, 255, 0.16);
+
+  --md-default-bg-color: #0f172a;
+  --md-default-fg-color: rgba(255, 255, 255, 0.92);
+  --md-typeset-a-color: #1e8aff;
+  --md-code-bg-color: rgba(177, 201, 232, 0.14);
+  --md-code-fg-color: rgba(255, 255, 255, 0.9);
+}
+
+html {
+  font-size: 19px;
+}
+
+/* Make the sidebar feel more "product-docs" than blog-like */
+.md-sidebar--primary .md-nav__title {
+  font-weight: 700;
+}
+
+/* Stronger active state for the left nav */
+[data-md-color-scheme="default"] .md-nav__link--active,
+[data-md-color-scheme="default"] .md-nav__link--active .md-nav__link {
+  color: #0033aa;
+  font-weight: 700;
+}
+
+[data-md-color-scheme="slate"] .md-nav__link--active,
+[data-md-color-scheme="slate"] .md-nav__link--active .md-nav__link {
+  color: #1e8aff;
+  font-weight: 700;
+}
+
+/* Slightly tighter typography for professional density */
+.md-typeset {
+  font-size: 1rem;
+}
+
+.md-typeset code,
+.md-typeset pre code {
+  font-size: 0.85em;
+}
+
+/* Ensure the header logo renders at a sane size */
+.md-header__button.md-logo img,
+.md-header__button.md-logo svg {
+  height: 28px;
+  width: auto;
+}
+
+/* Breadcrumbs (custom, because Material path may not render in some setups) */
+.md-breadcrumbs {
+  margin: 0.6rem 0 0.2rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9rem;
+}
+
+.md-breadcrumbs__sep {
+  opacity: 0.55;
+}
+
+.md-breadcrumbs__link {
+  text-decoration: none;
+}
+
+.md-breadcrumbs__current {
+  opacity: 0.9;
+}
