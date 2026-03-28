@@ -2,7 +2,9 @@ package mongo
 
 import (
 	"fmt"
+	"math"
 	"testing"
+	"time"
 
 	"gopkg.in/mgo.v2/bson"
 )
@@ -602,5 +604,323 @@ func TestApplyPipeline_Sample(t *testing.T) {
 	}
 	if len(out) != 3 {
 		t.Fatalf("expected 3 docs, got %d", len(out))
+	}
+}
+
+func TestApplyPipeline_ProjectYear(t *testing.T) {
+	docs := []bson.M{
+		{"_id": 1, "created_at": time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)},
+		{"_id": 2, "created_at": "2025-01-02T03:04:05Z"},
+	}
+	pipeline := []bson.M{
+		{"$project": bson.M{"_id": 1, "y": bson.M{"$year": "$created_at"}, "m": bson.M{"$month": "$created_at"}}},
+	}
+
+	out, err := applyPipeline(docs, pipeline)
+	if err != nil {
+		t.Fatalf("applyPipeline err: %v", err)
+	}
+	if out[0]["y"] != int64(2026) {
+		t.Fatalf("expected y=2026, got %#v", out[0]["y"])
+	}
+	if out[0]["m"] != int64(3) {
+		t.Fatalf("expected m=3, got %#v", out[0]["m"])
+	}
+	if out[1]["y"] != int64(2025) {
+		t.Fatalf("expected y=2025, got %#v", out[1]["y"])
+	}
+	if out[1]["m"] != int64(1) {
+		t.Fatalf("expected m=1, got %#v", out[1]["m"])
+	}
+}
+
+func TestApplyPipeline_Facet(t *testing.T) {
+	docs := []bson.M{
+		{"_id": 1, "age": 30, "salary": 10.0, "created_at": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
+		{"_id": 2, "age": 30, "salary": 20.0, "created_at": time.Date(2026, 1, 2, 0, 0, 0, 0, time.UTC)},
+		{"_id": 3, "age": 40, "salary": 50.0, "created_at": time.Date(2026, 1, 3, 0, 0, 0, 0, time.UTC)},
+	}
+
+	pipeline := []bson.M{{
+		"$facet": bson.M{
+			"age_stats": []interface{}{
+				bson.M{"$group": bson.M{"_id": "$age", "count": bson.M{"$sum": 1}}},
+				bson.M{"$sort": bson.M{"count": -1}},
+				bson.M{"$limit": 10},
+			},
+			"recent": []interface{}{
+				bson.M{"$sort": bson.M{"created_at": -1}},
+				bson.M{"$limit": 10},
+			},
+			"salary_stats": []interface{}{
+				bson.M{"$group": bson.M{"_id": nil, "avg_salary": bson.M{"$avg": "$salary"}, "max_salary": bson.M{"$max": "$salary"}}},
+			},
+		},
+	}}
+
+	out, err := applyPipeline(docs, pipeline)
+	if err != nil {
+		t.Fatalf("applyPipeline err: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected 1 doc, got %d", len(out))
+	}
+	ageStats, ok := out[0]["age_stats"].([]bson.M)
+	if !ok || len(ageStats) == 0 {
+		t.Fatalf("expected age_stats array, got %#v", out[0]["age_stats"])
+	}
+	recent, ok := out[0]["recent"].([]bson.M)
+	if !ok || len(recent) == 0 {
+		t.Fatalf("expected recent array, got %#v", out[0]["recent"])
+	}
+	if recent[0]["_id"] != 3 {
+		t.Fatalf("expected most recent _id=3, got %#v", recent[0]["_id"])
+	}
+	salaryStats, ok := out[0]["salary_stats"].([]bson.M)
+	if !ok || len(salaryStats) != 1 {
+		t.Fatalf("expected salary_stats array len=1, got %#v", out[0]["salary_stats"])
+	}
+	if salaryStats[0]["max_salary"] != 50.0 {
+		t.Fatalf("expected max_salary=50, got %#v", salaryStats[0]["max_salary"])
+	}
+}
+
+func TestApplyPipeline_SetWindowFields_AvgAndRank(t *testing.T) {
+	docs := []bson.M{
+		{"_id": 1, "age": 30, "salary": 20.0},
+		{"_id": 2, "age": 30, "salary": 10.0},
+		{"_id": 3, "age": 30, "salary": 20.0},
+		{"_id": 4, "age": 40, "salary": 5.0},
+	}
+
+	pipeline := []bson.M{{
+		"$setWindowFields": bson.M{
+			"partitionBy": "$age",
+			"sortBy":      bson.M{"salary": 1},
+			"output": bson.M{
+				"avgSalary": bson.M{"$avg": "$salary", "window": bson.M{"documents": []interface{}{"unbounded", "current"}}},
+				"rank":      bson.M{"$rank": bson.M{}},
+			},
+		},
+	}}
+
+	out, err := applyPipeline(docs, pipeline)
+	if err != nil {
+		t.Fatalf("applyPipeline err: %v", err)
+	}
+
+	byID := map[interface{}]bson.M{}
+	for _, d := range out {
+		byID[d["_id"]] = d
+	}
+
+	// Partition age=30 sorted salaries: 10 (rank 1, avg 10), 20 (rank 2, avg 15), 20 (rank 2, avg 16.666...)
+	if byID[2]["rank"] != int64(1) {
+		t.Fatalf("expected _id=2 rank=1, got %#v", byID[2]["rank"])
+	}
+	if byID[1]["rank"] != int64(2) || byID[3]["rank"] != int64(2) {
+		t.Fatalf("expected _id=1 and _id=3 rank=2, got %#v %#v", byID[1]["rank"], byID[3]["rank"])
+	}
+
+	avg2, _ := byID[2]["avgSalary"].(float64)
+	avg1, _ := byID[1]["avgSalary"].(float64)
+	avg3, _ := byID[3]["avgSalary"].(float64)
+	if math.Abs(avg2-10.0) > 1e-9 {
+		t.Fatalf("expected _id=2 avgSalary=10, got %#v", byID[2]["avgSalary"])
+	}
+	if math.Abs(avg1-15.0) > 1e-9 {
+		t.Fatalf("expected _id=1 avgSalary=15, got %#v", byID[1]["avgSalary"])
+	}
+	if math.Abs(avg3-(50.0/3.0)) > 1e-9 {
+		t.Fatalf("expected _id=3 avgSalary=16.666..., got %#v", byID[3]["avgSalary"])
+	}
+}
+
+func TestApplyPipeline_GraphLookup_ManagerChain(t *testing.T) {
+	base := []bson.M{
+		{"_id": 10, "manager_id": 3},
+	}
+	foreign := []bson.M{
+		{"user_id": 1, "manager_id": nil},
+		{"user_id": 2, "manager_id": 1},
+		{"user_id": 3, "manager_id": 2},
+		{"user_id": 4, "manager_id": 2},
+	}
+	resolver := func(from string) ([]bson.M, error) {
+		if from != "users" {
+			return nil, fmt.Errorf("unexpected from: %s", from)
+		}
+		return foreign, nil
+	}
+
+	pipeline := []bson.M{{
+		"$graphLookup": bson.M{
+			"from":             "users",
+			"startWith":        "$manager_id",
+			"connectFromField": "manager_id",
+			"connectToField":   "user_id",
+			"maxDepth":         3,
+			"as":               "hierarchy",
+		},
+	}}
+
+	out, err := applyPipelineWithLookup(base, pipeline, resolver)
+	if err != nil {
+		t.Fatalf("applyPipelineWithLookup err: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected 1 doc, got %d", len(out))
+	}
+	h, ok := out[0]["hierarchy"].([]bson.M)
+	if !ok {
+		t.Fatalf("expected hierarchy array, got %#v", out[0]["hierarchy"])
+	}
+	seen := map[interface{}]bool{}
+	for _, d := range h {
+		seen[d["user_id"]] = true
+	}
+	if !seen[3] || !seen[2] || !seen[1] {
+		t.Fatalf("expected hierarchy to include user_id 3->2->1, got %#v", h)
+	}
+}
+
+func TestApplyPipeline_Project_ArithmeticStringBoolArrayDate(t *testing.T) {
+	docs := []bson.M{
+		{
+			"_id":        1,
+			"a":          10,
+			"b":          3,
+			"name":       "  Alice  ",
+			"tags":       []interface{}{"x", "y", "z"},
+			"created_at": "2026-03-28T10:11:12Z",
+		},
+	}
+
+	pipeline := []bson.M{
+		{"$project": bson.M{
+			"_id": 1,
+			"abs": bson.M{"$abs": -5},
+			"add": bson.M{"$add": []interface{}{"$a", "$b", 1}},
+			"div": bson.M{"$divide": []interface{}{"$a", "$b"}},
+			"mod": bson.M{"$mod": []interface{}{"$a", "$b"}},
+			"pow": bson.M{"$pow": []interface{}{2, 3}},
+			"rnd": bson.M{"$round": []interface{}{3.14159, 2}},
+			"trc": bson.M{"$trunc": []interface{}{3.14159, 2}},
+
+			"concat": bson.M{"$concat": []interface{}{"Hi ", "Bob"}},
+			"lower":  bson.M{"$toLower": "AbC"},
+			"upper":  bson.M{"$toUpper": "aBc"},
+			"trim":   bson.M{"$trim": bson.M{"input": "$name"}},
+			"split":  bson.M{"$split": []interface{}{"a,b,c", ","}},
+			"repl":   bson.M{"$replaceAll": bson.M{"input": "a-a-a", "find": "-", "replacement": "_"}},
+			"lenb":   bson.M{"$strLenBytes": "hey"},
+
+			"eq":  bson.M{"$eq": []interface{}{"$a", 10}},
+			"gt":  bson.M{"$gt": []interface{}{"$a", 9}},
+			"cmp": bson.M{"$cmp": []interface{}{"$a", "$b"}},
+
+			"ifNullA": bson.M{"$ifNull": []interface{}{"$missing", 123}},
+			"sw": bson.M{"$switch": bson.M{
+				"branches": []interface{}{
+					bson.M{"case": bson.M{"$gt": []interface{}{"$a", 100}}, "then": "big"},
+					bson.M{"case": bson.M{"$gt": []interface{}{"$a", 5}}, "then": "mid"},
+				},
+				"default": "small",
+			}},
+			"and": bson.M{"$and": []interface{}{true, bson.M{"$eq": []interface{}{"$b", 3}}}},
+			"or":  bson.M{"$or": []interface{}{false, bson.M{"$eq": []interface{}{"$b", 4}}, true}},
+			"not": bson.M{"$not": []interface{}{false}},
+
+			"in":    bson.M{"$in": []interface{}{"y", "$tags"}},
+			"elem":  bson.M{"$arrayElemAt": []interface{}{"$tags", 1}},
+			"slice": bson.M{"$slice": []interface{}{"$tags", 1, 2}},
+			"rev":   bson.M{"$reverseArray": "$tags"},
+			"rng":   bson.M{"$range": []interface{}{1, 5, 2}},
+
+			"dt":   bson.M{"$toDate": "$created_at"},
+			"year": bson.M{"$year": bson.M{"$toDate": "$created_at"}},
+			"mon":  bson.M{"$month": bson.M{"$toDate": "$created_at"}},
+			"dom":  bson.M{"$dayOfMonth": bson.M{"$toDate": "$created_at"}},
+			"dow":  bson.M{"$dayOfWeek": bson.M{"$toDate": "$created_at"}},
+			"doy":  bson.M{"$dayOfYear": bson.M{"$toDate": "$created_at"}},
+			"hr":   bson.M{"$hour": bson.M{"$toDate": "$created_at"}},
+			"min":  bson.M{"$minute": bson.M{"$toDate": "$created_at"}},
+			"sec":  bson.M{"$second": bson.M{"$toDate": "$created_at"}},
+			"ms":   bson.M{"$millisecond": bson.M{"$toDate": "$created_at"}},
+			"wk":   bson.M{"$week": bson.M{"$toDate": "$created_at"}},
+		}},
+	}
+
+	out, err := applyPipeline(docs, pipeline)
+	if err != nil {
+		t.Fatalf("applyPipeline err: %v", err)
+	}
+	got := out[0]
+
+	if got["abs"] != 5.0 {
+		t.Fatalf("abs: %#v", got["abs"])
+	}
+	if got["add"] != 14.0 {
+		t.Fatalf("add: %#v", got["add"])
+	}
+	if got["div"] != (10.0 / 3.0) {
+		t.Fatalf("div: %#v", got["div"])
+	}
+	if got["mod"] != 1.0 {
+		t.Fatalf("mod: %#v", got["mod"])
+	}
+	if got["pow"] != 8.0 {
+		t.Fatalf("pow: %#v", got["pow"])
+	}
+	if got["rnd"] != 3.14 {
+		t.Fatalf("rnd: %#v", got["rnd"])
+	}
+	if got["trc"] != 3.14 {
+		t.Fatalf("trc: %#v", got["trc"])
+	}
+	if got["concat"] != "Hi Bob" {
+		t.Fatalf("concat: %#v", got["concat"])
+	}
+	if got["lower"] != "abc" || got["upper"] != "ABC" {
+		t.Fatalf("case: lower=%#v upper=%#v", got["lower"], got["upper"])
+	}
+	if got["trim"] != "Alice" {
+		t.Fatalf("trim: %#v", got["trim"])
+	}
+	if got["repl"] != "a_a_a" {
+		t.Fatalf("repl: %#v", got["repl"])
+	}
+	if got["lenb"] != int64(3) {
+		t.Fatalf("lenb: %#v", got["lenb"])
+	}
+	if got["eq"] != true || got["gt"] != true {
+		t.Fatalf("compare: eq=%#v gt=%#v", got["eq"], got["gt"])
+	}
+	if got["ifNullA"] != 123 {
+		t.Fatalf("ifNullA: %#v", got["ifNullA"])
+	}
+	if got["sw"] != "mid" {
+		t.Fatalf("switch: %#v", got["sw"])
+	}
+	if got["and"] != true || got["or"] != true || got["not"] != true {
+		t.Fatalf("bool: and=%#v or=%#v not=%#v", got["and"], got["or"], got["not"])
+	}
+	if got["in"] != true {
+		t.Fatalf("in: %#v", got["in"])
+	}
+	if got["elem"] != "y" {
+		t.Fatalf("elem: %#v", got["elem"])
+	}
+	if sl, ok := got["slice"].([]interface{}); !ok || len(sl) != 2 || sl[0] != "y" || sl[1] != "z" {
+		t.Fatalf("slice: %#v", got["slice"])
+	}
+	if rg, ok := got["rng"].([]interface{}); !ok || len(rg) != 2 || rg[0] != int64(1) || rg[1] != int64(3) {
+		t.Fatalf("range: %#v", got["rng"])
+	}
+	if _, ok := got["dt"].(time.Time); !ok {
+		t.Fatalf("toDate: %#v", got["dt"])
+	}
+	if got["year"] != int64(2026) || got["mon"] != int64(3) || got["dom"] != int64(28) {
+		t.Fatalf("date parts: year=%#v mon=%#v dom=%#v", got["year"], got["mon"], got["dom"])
 	}
 }

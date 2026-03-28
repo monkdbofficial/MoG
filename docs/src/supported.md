@@ -65,6 +65,9 @@ Stages implemented in the in-memory pipeline:
 - `$sort`
 - `$limit`
 - `$sample`
+- `$facet` (in-memory)
+- `$graphLookup` (limited: `from`, `startWith`, `connectFromField`, `connectToField`, `maxDepth`, `as`)
+- `$setWindowFields` (limited: partitionBy + single-field sortBy, `$avg` unbounded→current, `$rank`)
 
 Code pointer: `internal/mongo/pipeline.go`.
 
@@ -73,8 +76,11 @@ Code pointer: `internal/mongo/pipeline.go`.
 Supported expressions in `$addFields` / `$set`:
 
 - field reference (e.g. `"$a.b"`)
-- `$size`
-- `$isArray`
-- `$cond` (array form and object form)
+- Arithmetic: `$abs`, `$add`, `$ceil`, `$divide`, `$exp`, `$floor`, `$ln`, `$log`, `$log10`, `$mod`, `$multiply`, `$pow`, `$round`, `$sqrt`, `$subtract`, `$trunc`
+- String: `$concat`, `$replaceAll`, `$replaceOne`, `$split`, `$strLenBytes`, `$toLower`, `$toUpper`, `$trim`, `$ltrim`, `$rtrim`
+- Comparison: `$cmp`, `$eq`, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`
+- Conditional: `$cond` (array/object forms), `$ifNull`, `$switch`
+- Array: `$arrayElemAt`, `$concatArrays`, `$first`, `$in`, `$isArray`, `$last`, `$range`, `$reverseArray`, `$size`, `$slice`
+- Date: `$toDate`, `$dayOfMonth`, `$dayOfWeek`, `$dayOfYear`, `$hour`, `$millisecond`, `$minute`, `$month`, `$second`, `$week`, `$year`
 
 Code pointer: `internal/mongo/pipeline.go` (`evalAddFieldsValue`).
