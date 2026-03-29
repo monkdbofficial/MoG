@@ -163,7 +163,9 @@ func Load() (*Config, error) {
 	}
 
 	// Set default values
-	viper.SetDefault("db.host", "localhost")
+	// Prefer IPv4 loopback by default to avoid dual-stack "connection refused" noise on systems
+	// where `localhost` resolves to both ::1 and 127.0.0.1.
+	viper.SetDefault("db.host", "127.0.0.1")
 	viper.SetDefault("db.port", 5432)
 	viper.SetDefault("db.user", "monkdb")
 	viper.SetDefault("db.password", "monkdb")

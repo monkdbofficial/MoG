@@ -67,7 +67,10 @@ Stages implemented in the in-memory pipeline:
 - `$sample`
 - `$facet` (in-memory)
 - `$graphLookup` (limited: `from`, `startWith`, `connectFromField`, `connectToField`, `maxDepth`, `as`)
-- `$setWindowFields` (limited: partitionBy + single-field sortBy, `$avg` unbounded→current, `$rank`)
+- `$setWindowFields` (limited: partitionBy + single-field sortBy; `$avg` unbounded→current; `$rank`, `$denseRank`, `$documentNumber`, `$shift`)
+- `$replaceRoot` / `$replaceWith`
+- `$sortByCount`
+- `$unionWith` (requires resolver; in `aggregate` this resolves from SQL)
 
 Code pointer: `internal/mongo/pipeline.go`.
 
@@ -76,11 +79,21 @@ Code pointer: `internal/mongo/pipeline.go`.
 Supported expressions in `$addFields` / `$set`:
 
 - field reference (e.g. `"$a.b"`)
+- Misc: `$literal`, `$rand`, `$meta`, `$let`
 - Arithmetic: `$abs`, `$add`, `$ceil`, `$divide`, `$exp`, `$floor`, `$ln`, `$log`, `$log10`, `$mod`, `$multiply`, `$pow`, `$round`, `$sqrt`, `$subtract`, `$trunc`
 - String: `$concat`, `$replaceAll`, `$replaceOne`, `$split`, `$strLenBytes`, `$toLower`, `$toUpper`, `$trim`, `$ltrim`, `$rtrim`
+- String (Phase 2): `$substr`/`$substrBytes`/`$substrCP`, `$strLenCP`, `$indexOfBytes`, `$indexOfCP`, `$regexMatch`
+- String (Phase 3): `$regexFind`, `$regexFindAll`, `$strcasecmp`
 - Comparison: `$cmp`, `$eq`, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`
 - Conditional: `$cond` (array/object forms), `$ifNull`, `$switch`
-- Array: `$arrayElemAt`, `$concatArrays`, `$first`, `$in`, `$isArray`, `$last`, `$range`, `$reverseArray`, `$size`, `$slice`
+- Array: `$allElementsTrue`, `$anyElementTrue`, `$arrayElemAt`, `$concatArrays`, `$first`, `$in`, `$isArray`, `$last`, `$range`, `$reduce`, `$reverseArray`, `$size`, `$slice`, `$zip`
+- Array (Phase 2): `$map`, `$filter`, `$sortArray`
+- Array (Phase 3): `$arrayToObject`, `$objectToArray`, `$indexOfArray`
+- Set: `$setDifference`, `$setEquals`, `$setIntersection`, `$setIsSubset`, `$setUnion`
 - Date: `$toDate`, `$dayOfMonth`, `$dayOfWeek`, `$dayOfYear`, `$hour`, `$millisecond`, `$minute`, `$month`, `$second`, `$week`, `$year`
+- Date (Phase 2): `$dateFromString`, `$dateToString`, `$dateTrunc`, `$dateAdd`, `$dateSubtract`
+- Date (Phase 3): `$dateToParts`, `$dateFromParts`, `$dateDiff`, `$isoWeek`, `$isoWeekYear`, `$isoDayOfWeek`
+- Type conversion (Phase 3): `$convert`, `$toBool`, `$toDate`, `$toDouble`, `$toInt`, `$toLong`, `$toString`, `$type`
+- Object (Phase 3): `$getField`, `$setField`, `$unsetField`, `$mergeObjects`
 
 Code pointer: `internal/mongo/pipeline.go` (`evalAddFieldsValue`).

@@ -15,7 +15,8 @@ import (
 
 	"mog/internal/config"
 	"mog/internal/logging"
-	"mog/internal/mongo"
+	mongo "mog/internal/mongo/handler"
+	mwire "mog/internal/mongo/wire"
 	"mog/internal/translator"
 )
 
@@ -118,7 +119,7 @@ func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	w := getWriter(conn)
 	defer putWriter(w)
 	for {
-		header, body, err := mongo.ReadOp(r)
+		header, body, err := mwire.ReadOp(r)
 		if err != nil {
 			if errors.Is(err, io.EOF) {
 				logging.Logger().Debug("connection closed by client", zap.String("remote_addr", remoteAddr))

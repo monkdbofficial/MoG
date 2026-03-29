@@ -44,7 +44,15 @@ func main() {
 
 	pool, err := monkdb.NewPool(context.Background(), &cfg.DB)
 	if err != nil {
-		logging.Logger().Fatal("failed to create database pool", zap.Error(err))
+		logging.Logger().Warn("failed to create database pool",
+			zap.String("db_host", cfg.DB.Host),
+			zap.Int("db_port", cfg.DB.Port),
+			zap.String("db_user", cfg.DB.User),
+			zap.String("db_name", cfg.DB.DBName),
+			zap.String("hint", "Start MonkDB/Postgres or set MOG_DB_HOST/MOG_DB_PORT (and MOG_DB_USER/MOG_DB_PASSWORD/MOG_DB_NAME)"),
+			zap.Error(err),
+		)
+		os.Exit(1)
 	}
 	defer pool.Close()
 
