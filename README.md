@@ -9,7 +9,11 @@
   <br>
   <img src="https://img.shields.io/badge/MonkDB-MoG-blue" alt="MonkDB MoG" />
   <img src="https://img.shields.io/badge/version-v0.1.0-green" alt="Version" />
+<<<<<<< HEAD
     <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" />
+=======
+  <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" />
+>>>>>>> cd77b0515cfa0fbfdf6089ca211f475fc92fb06b
   <img src="https://img.shields.io/badge/go-1.25.5-00ADD8" alt="Go" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs Welcome" />
   <br>
@@ -253,6 +257,7 @@ If you discover a security vulnerability, please refer to [SECURITY.md](SECURITY
 
 ## License
 
+<<<<<<< HEAD
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ## Citation
@@ -267,6 +272,9 @@ If you use MoG (MonkDB Gateway) in your research or project, please cite it as f
   url = {https://github.com/monkdbofficial/mog}
 }
 ```
+=======
+This project is licensed under the Apache 2.0 License,  see the [LICENSE](LICENSE) file for details.
+>>>>>>> cd77b0515cfa0fbfdf6089ca211f475fc92fb06b
 
 ---
 
