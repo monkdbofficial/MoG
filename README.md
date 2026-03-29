@@ -1,31 +1,30 @@
-
 <p align="center">
   <img src="docs/src/imgs/monkdb_logo_v3.png" alt="MoG Logo" width="300"/>
-  <br>
-  <font size="+5"><b>MoG (MonkDB Gateway)</b></font>
-  <br>
+</p>
+
+<h1 align="center">MoG (MonkDB Gateway)</h1>
+
+<p align="center">
   <b>MongoDB wire protocol proxy for MonkDB</b>
-  <br>
-  <br>
+</p>
+
+<p align="center">
   <img src="https://img.shields.io/badge/MonkDB-MoG-blue" alt="MonkDB MoG" />
   <img src="https://img.shields.io/badge/version-v0.1.0-green" alt="Version" />
-<<<<<<< HEAD
-    <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" />
-=======
   <img src="https://img.shields.io/badge/License-Apache%202.0-blue.svg" alt="License" />
->>>>>>> cd77b0515cfa0fbfdf6089ca211f475fc92fb06b
   <img src="https://img.shields.io/badge/go-1.25.5-00ADD8" alt="Go" />
   <img src="https://img.shields.io/badge/PRs-welcome-brightgreen" alt="PRs Welcome" />
-  <br>
-  <br>
-  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&pause=100&color=F7DF1E&center=true&vCenter=true&width=435&lines=MongoDB+Wire+Protocol+Proxy;MonkDB+SQL+Translation;Hybrid+Aggregation+Engine;Cloud-Native+Observability" alt="Typing SVG" />
-  <br>
 </p>
+
+<p align="center">
+  <img src="https://readme-typing-svg.herokuapp.com?font=Fira+Code&pause=100&color=F7DF1E&center=true&vCenter=true&width=435&lines=MongoDB+Wire+Protocol+Proxy;MonkDB+SQL+Translation;Hybrid+Aggregation+Engine;Cloud-Native+Observability" alt="Typing SVG" />
+</p>
+
+---
 
 **MoG** is a MongoDB wire-protocol proxy for **MonkDB** built so you can use **MongoDB drivers, tools, and queries** to work with MonkDB **without changing application code**.
 
 In practice:
-
 - Keep your existing driver calls (`find`, `insert`, `update`, `aggregate`, …).
 - Change only the connection string: point your app to **MoG** instead of MongoDB.
 - MoG translates supported MongoDB commands into SQL over MonkDB’s document-table model, and returns Mongo-shaped responses.
@@ -37,7 +36,7 @@ In practice:
 MoG is designed for teams that like MongoDB’s developer experience, but want MonkDB as the backend.
 
 - **Drop-in for existing apps**: no rewrites; swap the MongoDB endpoint for MoG.
-- **Pragmatic compatibility**: implements a useful subset of the wire protocol and commands (see [Supported](docs/src/supported.md)).
+- **Pragmatic compatibility**: implements a useful subset of the wire protocol and commands.
 - **MonkDB-native storage**: documents are stored in MonkDB tables; optional raw document mirroring via `MOG_STORE_RAW_MONGO_JSON`.
 - **Hybrid performance**: pushes down what’s safe to SQL and evaluates the rest in Go.
 
@@ -55,6 +54,7 @@ MoG is designed for teams that like MongoDB’s developer experience, but want M
 - [Contributing](#contributing)
 - [Security](#security)
 - [License](#license)
+- [Citation](#citation)
 
 ## Key Features
 
@@ -66,7 +66,7 @@ MoG is designed for teams that like MongoDB’s developer experience, but want M
 - **High Availability**: Built with Go's standard library and `pgxpool` for robust connection management and scaling.
 - **Cloud-Native**: Includes a Prometheus exporter and pre-configured Grafana dashboards for monitoring performance.
 
-## Version & build info
+## Version & Build Info
 
 MoG binaries include a semantic version and build metadata:
 
@@ -74,105 +74,64 @@ MoG binaries include a semantic version and build metadata:
 go run ./cmd/mog --version
 ```
 
-- **Version:** `v0.1.0` (first open-source release)
-- **Build ID:** git commit SHA (embedded at build time when provided)
+- **Version:** `v0.1.0`
+- **Build ID:** git commit SHA (embedded at build time)
 
-To produce a fully stamped build (recommended for releases):
+To produce a fully stamped build:
 
 ```bash
 go build -o mog -ldflags "-X mog/internal/version.Version=v0.1.0 -X mog/internal/version.Commit=$(git rev-parse --short HEAD) -X mog/internal/version.BuildDate=$(date -u +%Y-%m-%dT%H:%M:%SZ)" ./cmd/mog
-./mog --version
 ```
 
 ## Architecture
 
 MoG acts as a bridge between the MongoDB world and the MonkDB relational world.
 
-```text
-                ┌──────────────────────────────────────────────────────────┐
-                │                          MoG                             │
-                │                    (Go process: `mog`)                   │
-                │                                                          │
-Mongo clients   │   ┌──────────────┐       ┌──────────────────────────┐    │
-(mongosh/───────┼──▶│ TCP server   │       │ Mongo wire layer         │    │
-drivers)        │   │ :27017       │──────▶│ - OP_MSG decode/encode   │    │
-                │   └──────────────┘       │ - command routing        │    │
-                │                          └────────────┬─────────────┘    │
-                │                                       │                  │
-                │                                       │ CRUD / metadata  │
-                │                                       ▼                  │
-                │                           ┌──────────────────────────┐   │
-                │                           │ SQL translator           │   │
-                │                           │ (filters/updates subset) │   │
-                │                           └───────────┬──────────────┘   │
-                │                                       │ SQL              │
-                │                                       ▼                  │
-                │                           ┌─────────────────────────┐    │
-                │                           │ MonkDB pool (pgxpool)   │    │
-                │                           └────────────┬────────────┘    │
-                │                                        │                 │
-                │                   Hybrid aggregate     │                 │
-                │                   (in-memory)          │                 │
-                │                     ┌──────────────────▼──────────────┐  │
-                │                     │ Pipeline evaluator (Go)         │  │
-                │                     │ $match/$project/$group/...      │  │
-                │                     └─────────────────────────────────┘  │
-                │                                                          │
-                │   ┌──────────────┐                                       │
-                │   │ Metrics HTTP │  GET /metrics                         │
-                │   │ :8080        │◀───────────────────────────────┐      │
-                │   └──────────────┘                                │      │
-                └───────────────────────────────────────────────────┼──────┘
-                                                                    │
-                                                          Prometheus scrapes
-                                                          Grafana queries Prometheus
-```
+<p align="center">
+  <img src="internal/data/images/arch.png" alt="MoG Architecture" width="800"/>
+</p>
 
 ## Supported Features
 
-MoG implements a growing subset of MongoDB features. While not yet 100% MongoDB-complete, it supports the core command surface needed for many applications.
+MoG implements a growing subset of MongoDB features. While not yet 100% MongoDB-complete, it supports the core command surface needed for most applications.
 
-### Core Commands
-- **CRUD**: `find`, `insert`, `update`, `delete`, `count`
-- **Metadata**: `listDatabases`, `listCollections`, `collStats`, `dbStats`
-- **Collections**: `create`, `drop`, `dropDatabase`
-- **Indexes**: `listIndexes`, `createIndexes`, `dropIndexes`
-- **Auth**: `saslStart`, `saslContinue` (SCRAM-SHA-256)
-- **Other**: `ping`, `hello`, `serverStatus`, `buildInfo`, `getParameter`, `hostInfo`
+### Command Surface
+| Category | Supported Commands |
+| :--- | :--- |
+| **CRUD** | `find`, `insert`, `update`, `delete`, `count` |
+| **Metadata** | `listDatabases`, `listCollections`, `collStats`, `dbStats` |
+| **Collections** | `create`, `drop`, `dropDatabase` |
+| **Indexes** | `listIndexes`, `createIndexes`, `dropIndexes` |
+| **Auth** | `saslStart`, `saslContinue` (SCRAM-SHA-256) |
+| **System** | `ping`, `hello`, `serverStatus`, `buildInfo`, `getParameter`, `hostInfo`, `getCmdLineOpts` |
 
-### Query & Update Operators
-- **Filters**: Equality, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`, `$in`
-- **Updates**: `$set`, `$inc`, replacement documents
+### Query & Update
+- **Filter Operators**: Equality, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`, `$in`, `$all`, `$exists`, `$type`
+- **Update Operators**: `$set`, `$inc`, `$unset`, `$push`, `$pull`, `$addToSet`, replacement documents
 
 ### Hybrid Aggregation Pipeline
 MoG uses a **hybrid aggregation engine**. It pushes the longest possible prefix down to SQL (leading `$match`, then optional `$group`, `$sort`, `$limit`, or `$count`) and evaluates remaining stages in memory (Go) for correctness.
 
-**Supported Stages:**
-- `$match`, `$project`, `$addFields`, `$set`, `$unset`
-- `$group`, `$sort`, `$limit`, `$sample`, `$count`
-- `$lookup`, `$unwind`, `$facet`, `$sortByCount`
-- `$graphLookup`, `$setWindowFields` (subset)
-- `$replaceRoot`, `$replaceWith`, `$unionWith`
+#### Supported Stages
+`$match`, `$project`, `$addFields`, `$set`, `$unset`, `$group`, `$sort`, `$limit`, `$sample`, `$count`, `$lookup`, `$unwind`, `$facet`, `$sortByCount`, `$graphLookup`, `$setWindowFields` (subset), `$replaceRoot`, `$replaceWith`, `$unionWith`
 
-<details>
-<summary><b>Supported Pipeline Expressions (Click to expand)</b></summary>
-
-- **Arithmetic:** `$add`, `$subtract`, `$multiply`, `$divide`, `$mod`, `$abs`, `$ceil`, `$floor`, `$round`, `$trunc`, `$exp`, `$ln`, `$log`, `$log10`, `$pow`, `$sqrt`
-- **String:** `$concat`, `$split`, `$strLenBytes`, `$strLenCP`, `$toLower`, `$toUpper`, `$trim`, `$ltrim`, `$rtrim`, `$replaceAll`, `$replaceOne`, `$substr`, `$indexOfBytes`, `$indexOfCP`, `$regexMatch`, `$regexFind`, `$regexFindAll`, `$strcasecmp`
-- **Array:** `$arrayElemAt`, `$concatArrays`, `$first`, `$last`, `$in`, `$isArray`, `$range`, `$reverseArray`, `$size`, `$slice`, `$zip`, `$map`, `$filter`, `$sortArray`, `$allElementsTrue`, `$anyElementTrue`, `$reduce`
-- **Date:** `$toDate`, `$dayOfMonth`, `$dayOfWeek`, `$dayOfYear`, `$hour`, `$millisecond`, `$minute`, `$month`, `$second`, `$week`, `$year`, `$dateToString`, `$dateFromString`, `$dateTrunc`, `$dateAdd`, `$dateSubtract`, `$dateDiff`
-- **Comparison:** `$cmp`, `$eq`, `$gt`, `$gte`, `$lt`, `$lte`, `$ne`
-- **Conditional:** `$cond`, `$ifNull`, `$switch`
-- **Type/Object:** `$convert`, `$type`, `$toBool`, `$toDouble`, `$toInt`, `$toLong`, `$toString`, `$getField`, `$setField`, `$unsetField`, `$mergeObjects`, `$objectToArray`, `$arrayToObject`
-- **Misc:** `$literal`, `$rand`, `$meta`, `$let`
-</details>
+| Expression Category | Supported Operators |
+| :--- | :--- |
+| **Arithmetic** | `$add`, `$subtract`, `$multiply`, `$divide`, `$mod`, `$abs`, `$ceil`, `$floor`, `$round`, `$trunc`, `$exp`, `$ln`, `$log`, `$log10`, `$pow`, `$sqrt` |
+| **String** | `$concat`, `$split`, `$strLenBytes`, `$strLenCP`, `$toLower`, `$toUpper`, `$trim`, `$ltrim`, `$rtrim`, `$replaceAll`, `$replaceOne`, `$substr`, `$indexOfBytes`, `$indexOfCP`, `$regexMatch`, `$regexFind`, `$regexFindAll`, `$strcasecmp` |
+| **Array** | `$arrayElemAt`, `$concatArrays`, `$first`, `$last`, `$in`, `$isArray`, `$range`, `$reverseArray`, `$size`, `$slice`, `$zip`, `$map`, `$filter`, `$sortArray`, `$allElementsTrue`, `$anyElementTrue`, `$reduce`, `$arrayToObject`, `$objectToArray`, `$indexOfArray` |
+| **Date** | `$toDate`, `$dayOfMonth`, `$dayOfWeek`, `$dayOfYear`, `$hour`, `$millisecond`, `$minute`, `$month`, `$second`, `$week`, `$year`, `$dateToString`, `$dateFromString`, `$dateTrunc`, `$dateAdd`, `$dateSubtract`, `$dateDiff` |
+| **Comparison** | `$cmp`, `$eq`, `$gt`, `$gte`, `$lt`, `$lte`, `$ne` |
+| **Conditional** | `$cond`, `$ifNull`, `$switch` |
+| **Type/Object** | `$convert`, `$type`, `$toBool`, `$toDouble`, `$toInt`, `$toLong`, `$toString`, `$getField`, `$setField`, `$unsetField`, `$mergeObjects` |
+| **Misc/Sets** | `$literal`, `$rand`, `$meta`, `$let`, `$setDifference`, `$setEquals`, `$setIntersection`, `$setIsSubset`, `$setUnion` |
 
 ## Getting Started
 
 ### Prerequisites
 
 - [Go 1.25+](https://go.dev/dl/)
-- A running [MonkDB](https://github.com/monkdb/monkdb) instance (or Postgres-compatible backend).
+- A running [MonkDB](https://www.monkdb.com) instance
 
 ### Installation & Run
 
@@ -257,7 +216,6 @@ If you discover a security vulnerability, please refer to [SECURITY.md](SECURITY
 
 ## License
 
-<<<<<<< HEAD
 This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
 
 ## Citation
@@ -272,9 +230,6 @@ If you use MoG (MonkDB Gateway) in your research or project, please cite it as f
   url = {https://github.com/monkdbofficial/mog}
 }
 ```
-=======
-This project is licensed under the Apache 2.0 License,  see the [LICENSE](LICENSE) file for details.
->>>>>>> cd77b0515cfa0fbfdf6089ca211f475fc92fb06b
 
 ---
 
