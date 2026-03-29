@@ -1,4 +1,4 @@
-package mongo
+package sql
 
 import (
 	"errors"
@@ -7,7 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
-func isUndefinedColumn(err error) bool {
+func IsUndefinedColumn(err error) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
 		return false
@@ -16,7 +16,7 @@ func isUndefinedColumn(err error) bool {
 	return pgErr.Code == "42703"
 }
 
-func isUndefinedRelation(err error) bool {
+func IsUndefinedRelation(err error) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
 		return false
@@ -25,7 +25,7 @@ func isUndefinedRelation(err error) bool {
 	return pgErr.Code == "42P01"
 }
 
-func isUndefinedSchema(err error) bool {
+func IsUndefinedSchema(err error) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
 		return false
@@ -34,7 +34,7 @@ func isUndefinedSchema(err error) bool {
 	return pgErr.Code == "3F000"
 }
 
-func isDuplicateColumn(err error) bool {
+func IsDuplicateColumn(err error) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
 		return false
@@ -43,7 +43,7 @@ func isDuplicateColumn(err error) bool {
 	return pgErr.Code == "42701"
 }
 
-func isDuplicateObject(err error) bool {
+func IsDuplicateObject(err error) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
 		return false
@@ -52,7 +52,7 @@ func isDuplicateObject(err error) bool {
 	return pgErr.Code == "42710" || pgErr.Code == "42P07"
 }
 
-func isUniqueViolation(err error) bool {
+func IsUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
 		// PostgreSQL: 23505 = unique_violation
@@ -69,7 +69,7 @@ func isUniqueViolation(err error) bool {
 	return strings.Contains(msg, "duplicate key") || strings.Contains(msg, "unique constraint") || strings.Contains(msg, "unique violation")
 }
 
-func isDuplicateColumnName(err error) bool {
+func IsDuplicateColumnName(err error) bool {
 	errStr := ""
 	if pgErr, ok := err.(*pgconn.PgError); ok {
 		errStr = pgErr.Message
@@ -79,5 +79,5 @@ func isDuplicateColumnName(err error) bool {
 	if strings.Contains(errStr, "already has a column named") {
 		return true
 	}
-	return isDuplicateColumn(err)
+	return IsDuplicateColumn(err)
 }

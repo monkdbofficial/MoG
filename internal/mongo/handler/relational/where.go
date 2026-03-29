@@ -1,4 +1,4 @@
-package mongo
+package relational
 
 import (
 	"fmt"
@@ -6,16 +6,18 @@ import (
 	"strings"
 
 	"gopkg.in/mgo.v2/bson"
+
+	"mog/internal/mongo/handler/shared"
 )
 
-type relationalWhere struct {
+type Where struct {
 	SQL  string
 	Args []interface{}
 }
 
-func buildRelationalWhere(filter bson.M) (*relationalWhere, bool, error) {
+func BuildWhere(filter bson.M) (*Where, bool, error) {
 	if len(filter) == 0 {
-		return &relationalWhere{SQL: "", Args: nil}, true, nil
+		return &Where{SQL: "", Args: nil}, true, nil
 	}
 
 	argN := 1
@@ -40,7 +42,7 @@ func buildRelationalWhere(filter bson.M) (*relationalWhere, bool, error) {
 		}
 
 		// Operator object?
-		if cond, ok := coerceBsonM(val); ok && docHasOperatorKeys(cond) {
+		if cond, ok := shared.CoerceBsonM(val); ok && shared.DocHasOperatorKeys(cond) {
 			// Only a small safe subset.
 			ops := make([]string, 0, len(cond))
 			for op := range cond {
@@ -62,7 +64,7 @@ func buildRelationalWhere(filter bson.M) (*relationalWhere, bool, error) {
 					args = append(args, opVal)
 					argN++
 				case "$in":
-					list, ok := coerceInterfaceSlice(opVal)
+					list, ok := shared.CoerceInterfaceSlice(opVal)
 					if !ok || len(list) == 0 {
 						return nil, false, nil
 					}
@@ -87,12 +89,12 @@ func buildRelationalWhere(filter bson.M) (*relationalWhere, bool, error) {
 	}
 
 	if len(parts) == 0 {
-		return &relationalWhere{SQL: "", Args: nil}, true, nil
+		return &Where{SQL: "", Args: nil}, true, nil
 	}
-	return &relationalWhere{SQL: strings.Join(parts, " AND "), Args: args}, true, nil
+	return &Where{SQL: strings.Join(parts, " AND "), Args: args}, true, nil
 }
 
-func buildRelationalOrderBy(sortSpec bson.M) (string, bool, error) {
+func BuildOrderBy(sortSpec bson.M) (string, bool, error) {
 	if len(sortSpec) == 0 {
 		return "", true, nil
 	}
@@ -150,7 +152,7 @@ func relationalAccessor(path string) (string, bool) {
 		return "", false
 	}
 	for _, p := range parts {
-		if p == "" || !isSafeIdentifier(p) {
+		if p == "" || !shared.IsSafeIdentifier(p) {
 			return "", false
 		}
 	}
@@ -161,7 +163,7 @@ func relationalAccessor(path string) (string, bool) {
 	}
 
 	root := parts[0]
-	col := sqlColumnNameForField(root)
+	col := shared.SQLColumnNameForField(root)
 	if col == "" || col == "id" || col == "data" {
 		return "", false
 	}

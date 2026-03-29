@@ -9,6 +9,7 @@ import (
 	"go.mongodb.org/mongo-driver/x/mongo/driver/wiremessage"
 	"gopkg.in/mgo.v2/bson"
 
+	"mog/internal/mongo/handler/shared"
 	mwire "mog/internal/mongo/wire"
 )
 
@@ -116,7 +117,7 @@ func (h *Handler) maybeSpeculativeAuth(cmd bson.M, resp bson.M) error {
 	if !ok || raw == nil {
 		return nil
 	}
-	spec, ok := coerceBsonM(raw)
+	spec, ok := shared.CoerceBsonM(raw)
 	if !ok {
 		return nil
 	}

@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/mgo.v2/bson"
 
+	"mog/internal/mongo/handler/shared"
 	mpipeline "mog/internal/mongo/pipeline"
 )
 
@@ -159,10 +160,10 @@ func uniqueIndexTupleIsScalar(tuple []interface{}) bool {
 		if v == nil {
 			return false
 		}
-		if _, ok := coerceInterfaceSlice(v); ok {
+		if _, ok := shared.CoerceInterfaceSlice(v); ok {
 			return false
 		}
-		if _, ok := coerceBsonM(v); ok {
+		if _, ok := shared.CoerceBsonM(v); ok {
 			return false
 		}
 	}
@@ -181,7 +182,7 @@ func (h *Handler) uniqueKeyExistsSQL(ctx context.Context, exec DBExecutor, physi
 		if strings.Contains(f, ".") {
 			return false, fmt.Errorf("dotted unique keys not supported")
 		}
-		col := sqlColumnNameForField(f)
+		col := shared.SQLColumnNameForField(f)
 		if col == "" || col == "id" || col == "data" {
 			return false, fmt.Errorf("unsupported unique index field %q", f)
 		}
@@ -263,7 +264,7 @@ func explodeUniqueIndexValues(v interface{}) []interface{} {
 	if v == nil {
 		return nil
 	}
-	if arr, ok := coerceInterfaceSlice(v); ok {
+	if arr, ok := shared.CoerceInterfaceSlice(v); ok {
 		out := make([]interface{}, 0, len(arr))
 		for _, el := range arr {
 			if el == nil {

@@ -1,4 +1,4 @@
-package mongo
+package relational
 
 import (
 	"fmt"
@@ -7,10 +7,11 @@ import (
 
 	"gopkg.in/mgo.v2/bson"
 
+	"mog/internal/mongo/handler/shared"
 	mpipeline "mog/internal/mongo/pipeline"
 )
 
-type relationalAggPlan struct {
+type AggPlan struct {
 	SQL            string
 	Args           []interface{}
 	Fields         []string
@@ -27,7 +28,7 @@ type relationalAggPlan struct {
 // - optional $limit
 //
 // Any remaining stages should be evaluated in-memory with the pipeline engine.
-func buildRelationalAggPrefixPlan(physical string, pipeline []bson.M) (*relationalAggPlan, bool, error) {
+func BuildAggPrefixPlan(physical string, pipeline []bson.M) (*AggPlan, bool, error) {
 	if physical == "" || len(pipeline) == 0 {
 		return nil, false, nil
 	}
@@ -52,7 +53,7 @@ func buildRelationalAggPrefixPlan(physical string, pipeline []bson.M) (*relation
 	whereSQL := ""
 	args := []interface{}(nil)
 	if len(mergedMatch) > 0 {
-		where, ok, err := buildRelationalWhere(mergedMatch)
+		where, ok, err := BuildWhere(mergedMatch)
 		if err != nil {
 			return nil, false, err
 		}
@@ -85,7 +86,7 @@ func buildRelationalAggPrefixPlan(physical string, pipeline []bson.M) (*relation
 		if strings.Contains(idPath, ".") {
 			return nil, false, nil
 		}
-		idCol := sqlColumnNameForField(idPath)
+		idCol := shared.SQLColumnNameForField(idPath)
 		if idCol == "" || idCol == "id" || idCol == "data" {
 			return nil, false, nil
 		}
@@ -120,7 +121,7 @@ func buildRelationalAggPrefixPlan(physical string, pipeline []bson.M) (*relation
 				if strings.Contains(p, ".") {
 					return nil, false, nil
 				}
-				c := sqlColumnNameForField(p)
+				c := shared.SQLColumnNameForField(p)
 				if c == "" || c == "id" || c == "data" {
 					return nil, false, nil
 				}
@@ -208,5 +209,5 @@ done:
 	if consumed == 0 {
 		return nil, false, nil
 	}
-	return &relationalAggPlan{SQL: query, Args: args, Fields: fields, ConsumedStages: consumed}, true, nil
+	return &AggPlan{SQL: query, Args: args, Fields: fields, ConsumedStages: consumed}, true, nil
 }

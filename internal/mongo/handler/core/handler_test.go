@@ -11,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/x/mongo/driver/wiremessage"
 	"gopkg.in/mgo.v2/bson"
 
+	"mog/internal/mongo/handler/shared"
 	mwire "mog/internal/mongo/wire"
 	"mog/internal/translator"
 )
@@ -189,12 +190,12 @@ func TestPhysicalCollectionName(t *testing.T) {
 }
 
 func TestCoerceBsonM(t *testing.T) {
-	m, ok := coerceBsonM(map[string]interface{}{"a": 1})
+	m, ok := shared.CoerceBsonM(map[string]interface{}{"a": 1})
 	if !ok || m["a"] != 1 {
 		t.Fatalf("expected map coercion, got %#v ok=%v", m, ok)
 	}
 	d := bson.D{{Name: "b", Value: "x"}}
-	m, ok = coerceBsonM(d)
+	m, ok = shared.CoerceBsonM(d)
 	if !ok || m["b"] != "x" {
 		t.Fatalf("expected D coercion, got %#v ok=%v", m, ok)
 	}

@@ -10,6 +10,8 @@ import (
 	"unicode/utf8"
 
 	"gopkg.in/mgo.v2/bson"
+
+	"mog/internal/mongo/handler/shared"
 )
 
 func normalizeRowValue(v interface{}) interface{} {
@@ -57,7 +59,7 @@ func normalizeSQLArgs(args []interface{}) ([]interface{}, error) {
 		case bson.ObjectId:
 			out = append(out, a.(bson.ObjectId).Hex())
 		case bson.M, bson.D, map[string]interface{}, []interface{}:
-			s, err := marshalObject(a)
+			s, err := shared.MarshalObject(a)
 			if err != nil {
 				return nil, err
 			}

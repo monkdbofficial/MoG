@@ -8,6 +8,8 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/mgo.v2/bson"
+
+	"mog/internal/mongo/handler/shared"
 )
 
 // SQL schema and document loading helpers.
@@ -113,7 +115,7 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 				// When enabled, `data` stores the raw Mongo document (including arrays).
 				// Keep it internal: only used for reconstruction and uniqueness checks.
 				if h.storeRawMongoJSON && val != nil {
-					if m, ok := coerceBsonM(val); ok {
+					if m, ok := shared.CoerceBsonM(val); ok {
 						rawDoc = m
 					}
 				}
@@ -122,7 +124,7 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 			if val == nil {
 				continue
 			}
-			field := mongoFieldNameForColumn(col)
+			field := shared.MongoFieldNameForColumn(col)
 			if field == "" || field == "_id" {
 				continue
 			}
@@ -202,7 +204,7 @@ func (h *Handler) ensureCollectionTableExec(ctx context.Context, exec DBExecutor
 	if exec == nil {
 		return fmt.Errorf("db executor is nil")
 	}
-	if !isSafeIdentifier(collection) {
+	if !shared.IsSafeIdentifier(collection) {
 		return fmt.Errorf("invalid collection name: %s", collection)
 	}
 	// Schema is cached per-process and shared across connections/handlers.
@@ -288,7 +290,7 @@ func (h *Handler) ensureColumnExec(ctx context.Context, exec DBExecutor, physica
 	if h.schemaCache().hasColumn(physical, col) {
 		return nil
 	}
-	if strings.HasPrefix(col, "_") || !isSafeIdentifier(col) {
+	if strings.HasPrefix(col, "_") || !shared.IsSafeIdentifier(col) {
 		return fmt.Errorf("field %q is not supported as a SQL column name", col)
 	}
 	if _, err := exec.Exec(ctx, fmt.Sprintf("ALTER TABLE doc.%s ADD COLUMN %s %s", physical, col, sqlType)); err != nil {

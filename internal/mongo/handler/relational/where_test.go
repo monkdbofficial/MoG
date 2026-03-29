@@ -1,4 +1,4 @@
-package mongo
+package relational
 
 import "testing"
 
@@ -19,7 +19,7 @@ func TestRelationalAccessor_Nested(t *testing.T) {
 }
 
 func TestBuildRelationalWhere_NestedEquality(t *testing.T) {
-	w, ok, err := buildRelationalWhere(bson.M{"addr.city": "Hyd"})
+	w, ok, err := BuildWhere(bson.M{"addr.city": "Hyd"})
 	if err != nil || !ok || w == nil {
 		t.Fatalf("unexpected: ok=%v err=%v w=%#v", ok, err, w)
 	}
@@ -32,7 +32,7 @@ func TestBuildRelationalWhere_NestedEquality(t *testing.T) {
 }
 
 func TestBuildRelationalWhere_NumericCast(t *testing.T) {
-	w, ok, err := buildRelationalWhere(bson.M{"age": bson.M{"$gt": 25}})
+	w, ok, err := BuildWhere(bson.M{"age": bson.M{"$gt": 25}})
 	if err != nil || !ok || w == nil {
 		t.Fatalf("unexpected: ok=%v err=%v w=%#v", ok, err, w)
 	}

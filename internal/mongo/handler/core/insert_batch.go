@@ -10,6 +10,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 
 	"mog/internal/logging"
+	"mog/internal/mongo/handler/shared"
 	mpipeline "mog/internal/mongo/pipeline"
 )
 
@@ -29,7 +30,7 @@ func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []int
 	docs := make([]insertPreparedDoc, 0, len(rawDocs))
 	for _, d := range rawDocs {
 		seen++
-		doc, ok := coerceBsonM(d)
+		doc, ok := shared.CoerceBsonM(d)
 		if !ok {
 			continue
 		}
@@ -57,7 +58,7 @@ func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []int
 			if k == "" || k == "_id" {
 				continue
 			}
-			col := sqlColumnNameForField(k)
+			col := shared.SQLColumnNameForField(k)
 			if col == "" || col == "id" || col == "data" {
 				continue
 			}
@@ -134,7 +135,7 @@ func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []int
 					args = append(args, pd.docID)
 					valExprs = append(valExprs, fmt.Sprintf("$%d", argN))
 				case "data":
-					docJSON, err := marshalObject(pd.doc)
+					docJSON, err := shared.MarshalObject(pd.doc)
 					if err != nil {
 						return seen, inserted, err
 					}
@@ -142,7 +143,7 @@ func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []int
 					args = append(args, docJSON)
 					valExprs = append(valExprs, fmt.Sprintf("CAST($%d AS OBJECT(DYNAMIC))", argN))
 				default:
-					field := mongoFieldNameForColumn(c)
+					field := shared.MongoFieldNameForColumn(c)
 					v, exists := pd.doc[field]
 					if !exists || v == nil {
 						valExprs = append(valExprs, "NULL")
@@ -151,7 +152,7 @@ func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []int
 					sqlType := colTypes[c]
 					switch {
 					case sqlType == "OBJECT(DYNAMIC)":
-						js, err := marshalObject(v)
+						js, err := shared.MarshalObject(v)
 						if err != nil {
 							return seen, inserted, err
 						}
@@ -173,14 +174,14 @@ func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []int
 						valExprs = append(valExprs, fmt.Sprintf("$%d", argN))
 					case sqlType == "TEXT":
 						// Arrays/objects are stored as JSON-encoded text so they can be rehydrated on reads.
-						if _, ok := coerceInterfaceSlice(v); ok {
-							js, err := marshalObject(v)
+						if _, ok := shared.CoerceInterfaceSlice(v); ok {
+							js, err := shared.MarshalObject(v)
 							if err != nil {
 								return seen, inserted, err
 							}
 							v = js
-						} else if _, ok := coerceBsonM(v); ok {
-							js, err := marshalObject(v)
+						} else if _, ok := shared.CoerceBsonM(v); ok {
+							js, err := shared.MarshalObject(v)
 							if err != nil {
 								return seen, inserted, err
 							}

@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/mgo.v2/bson"
 
+	"mog/internal/mongo/handler/shared"
 	mpipeline "mog/internal/mongo/pipeline"
 	mupdate "mog/internal/mongo/update"
 )
@@ -51,7 +52,7 @@ func (h *Handler) applyDynamicUpdate(ctx context.Context, tx pgx.Tx, physical st
 			rows.Close()
 			return 0, 0, err
 		}
-		doc, okDoc := coerceBsonM(v)
+		doc, okDoc := shared.CoerceBsonM(v)
 		if !okDoc {
 			continue
 		}
@@ -72,7 +73,7 @@ func (h *Handler) applyDynamicUpdate(ctx context.Context, tx pgx.Tx, physical st
 		newDoc, _ := mupdate.ApplyUpdate(fd.doc, update)
 		normalizeDocForStorage(newDoc)
 
-		docJSON, err := marshalObject(newDoc)
+		docJSON, err := shared.MarshalObject(newDoc)
 		if err != nil {
 			return 0, 0, err
 		}

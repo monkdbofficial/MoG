@@ -8,6 +8,7 @@ import (
 
 	"gopkg.in/mgo.v2/bson"
 
+	"mog/internal/mongo/handler/shared"
 	mpipeline "mog/internal/mongo/pipeline"
 )
 
@@ -25,7 +26,7 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 		if k == "" || k == "_id" {
 			continue
 		}
-		col := sqlColumnNameForField(k)
+		col := shared.SQLColumnNameForField(k)
 		if col == "" || col == "id" || col == "data" {
 			continue
 		}
@@ -54,7 +55,7 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 			hasDataCol = true
 			continue
 		}
-		field := mongoFieldNameForColumn(c)
+		field := shared.MongoFieldNameForColumn(c)
 		v, exists := doc[field]
 		if !exists || v == nil {
 			setParts = append(setParts, fmt.Sprintf("%s = NULL", c))
@@ -64,7 +65,7 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 		sqlType := sqlTypeForValue(v)
 		switch sqlType {
 		case "OBJECT(DYNAMIC)":
-			js, err := marshalObject(v)
+			js, err := shared.MarshalObject(v)
 			if err != nil {
 				return err
 			}
@@ -88,8 +89,8 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 			}
 			// For TEXT columns, encode arrays/objects as JSON so they can be rehydrated on reads.
 			if sqlType == "TEXT" {
-				if _, ok := coerceInterfaceSlice(v); ok {
-					js, err := marshalObject(v)
+				if _, ok := shared.CoerceInterfaceSlice(v); ok {
+					js, err := shared.MarshalObject(v)
 					if err != nil {
 						return err
 					}
@@ -97,8 +98,8 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 					setParts = append(setParts, fmt.Sprintf("%s = $%d", c, len(args)))
 					continue
 				}
-				if _, ok := coerceBsonM(v); ok {
-					js, err := marshalObject(v)
+				if _, ok := shared.CoerceBsonM(v); ok {
+					js, err := shared.MarshalObject(v)
 					if err != nil {
 						return err
 					}
@@ -127,7 +128,7 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 	// in the same statement.
 	wantRaw := h.storeRawMongoJSON || hasDataCol
 	if wantRaw {
-		docJSON, err := marshalObject(doc)
+		docJSON, err := shared.MarshalObject(doc)
 		if err != nil {
 			return err
 		}
@@ -161,7 +162,7 @@ func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physica
 
 	if storeRaw {
 		cols = append(cols, "data")
-		docJSON, err := marshalObject(doc)
+		docJSON, err := shared.MarshalObject(doc)
 		if err != nil {
 			return err
 		}
@@ -180,7 +181,7 @@ func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physica
 
 	for _, k := range keys {
 		v := doc[k]
-		col := sqlColumnNameForField(k)
+		col := shared.SQLColumnNameForField(k)
 		if col == "" || col == "id" || col == "data" {
 			continue
 		}
@@ -198,7 +199,7 @@ func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physica
 		}
 		switch sqlType {
 		case "OBJECT(DYNAMIC)":
-			js, err := marshalObject(v)
+			js, err := shared.MarshalObject(v)
 			if err != nil {
 				return err
 			}
@@ -222,8 +223,8 @@ func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physica
 			}
 			// For TEXT columns, encode arrays/objects as JSON so they can be rehydrated on reads.
 			if sqlType == "TEXT" {
-				if _, ok := coerceInterfaceSlice(v); ok {
-					js, err := marshalObject(v)
+				if _, ok := shared.CoerceInterfaceSlice(v); ok {
+					js, err := shared.MarshalObject(v)
 					if err != nil {
 						return err
 					}
@@ -231,8 +232,8 @@ func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physica
 					exprs = append(exprs, fmt.Sprintf("$%d", len(args)))
 					continue
 				}
-				if _, ok := coerceBsonM(v); ok {
-					js, err := marshalObject(v)
+				if _, ok := shared.CoerceBsonM(v); ok {
+					js, err := shared.MarshalObject(v)
 					if err != nil {
 						return err
 					}

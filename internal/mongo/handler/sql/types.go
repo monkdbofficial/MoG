@@ -1,4 +1,4 @@
-package mongo
+package sql
 
 import (
 	"fmt"
@@ -8,10 +8,11 @@ import (
 
 	"gopkg.in/mgo.v2/bson"
 
+	"mog/internal/mongo/handler/shared"
 	mpipeline "mog/internal/mongo/pipeline"
 )
 
-func sqlTypeForValue(v interface{}) string {
+func TypeForValue(v interface{}) string {
 	if v == nil {
 		return ""
 	}
@@ -27,10 +28,10 @@ func sqlTypeForValue(v interface{}) string {
 		// Prefer a broadly-supported type over `TIMESTAMPTZ` to avoid "illegal syntax".
 		return "TIMESTAMP"
 	default:
-		if _, ok := coerceBsonM(v); ok {
+		if _, ok := shared.CoerceBsonM(v); ok {
 			return "OBJECT(DYNAMIC)"
 		}
-		if arr, ok := coerceInterfaceSlice(v); ok {
+		if arr, ok := shared.CoerceInterfaceSlice(v); ok {
 			// Heuristic: numeric arrays are treated as vectors.
 			if floats, ok := coerceFloat64Slice(arr); ok && len(floats) > 0 && len(floats) <= 2048 {
 				return fmt.Sprintf("FLOAT_VECTOR(%d)", len(floats))
@@ -58,8 +59,8 @@ func coerceFloat64Slice(arr []interface{}) ([]float64, bool) {
 	return out, true
 }
 
-func floatVectorLiteral(v interface{}) (string, int, bool) {
-	arr, ok := coerceInterfaceSlice(v)
+func FloatVectorLiteral(v interface{}) (string, int, bool) {
+	arr, ok := shared.CoerceInterfaceSlice(v)
 	if !ok {
 		return "", 0, false
 	}

@@ -1,4 +1,4 @@
-package mongo
+package shared
 
 import (
 	"reflect"
@@ -11,7 +11,7 @@ import (
 //
 // This is used to distinguish between "operator documents" (e.g. {"$gt": 1})
 // and regular objects when evaluating filters and update expressions.
-func docHasOperatorKeys(m bson.M) bool {
+func DocHasOperatorKeys(m bson.M) bool {
 	for k := range m {
 		if strings.HasPrefix(k, "$") {
 			return true
@@ -22,7 +22,7 @@ func docHasOperatorKeys(m bson.M) bool {
 
 // coerceInterfaceSlice attempts to view v as a slice/array of interface{} while
 // avoiding treating raw bytes as an array for MongoDB-like semantics.
-func coerceInterfaceSlice(v interface{}) ([]interface{}, bool) {
+func CoerceInterfaceSlice(v interface{}) ([]interface{}, bool) {
 	switch t := v.(type) {
 	case []interface{}:
 		return t, true

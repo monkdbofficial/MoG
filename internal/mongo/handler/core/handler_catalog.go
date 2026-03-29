@@ -2,13 +2,13 @@ package mongo
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
-	"sort"
 	"strings"
 	"sync"
 
 	"gopkg.in/mgo.v2/bson"
+
+	"mog/internal/mongo/handler/shared"
 )
 
 // Catalog and backend-introspection helpers.
@@ -16,7 +16,7 @@ func (h *Handler) dropCollectionTable(ctx context.Context, collection string) er
 	if h.pool == nil {
 		return fmt.Errorf("database pool is not configured")
 	}
-	if !isSafeIdentifier(collection) {
+	if !shared.IsSafeIdentifier(collection) {
 		return fmt.Errorf("invalid collection name: %s", collection)
 	}
 	_ = h.ensureDocSchema(ctx)
@@ -34,7 +34,7 @@ func (h *Handler) dropDatabase(ctx context.Context, dbName string) error {
 	if dbName == "" {
 		return nil
 	}
-	if !isSafeIdentifier(dbName) {
+	if !shared.IsSafeIdentifier(dbName) {
 		return fmt.Errorf("invalid database name: %s", dbName)
 	}
 
@@ -76,15 +76,15 @@ func physicalCollectionName(dbName, collection string) (string, error) {
 	// don't collide on the same backend schema.
 	var physical string
 	if dbName == "" {
-		if !isSafeIdentifier(collection) {
+		if !shared.IsSafeIdentifier(collection) {
 			return "", fmt.Errorf("invalid collection name: %s", collection)
 		}
 		physical = collection
 	} else {
-		if !isSafeIdentifier(dbName) {
+		if !shared.IsSafeIdentifier(dbName) {
 			return "", fmt.Errorf("invalid database name: %s", dbName)
 		}
-		if !isSafeIdentifier(collection) {
+		if !shared.IsSafeIdentifier(collection) {
 			return "", fmt.Errorf("invalid collection name: %s", collection)
 		}
 		physical = dbName + "__" + collection
@@ -158,10 +158,10 @@ func (h *Handler) catalogUpsert(ctx context.Context, dbName, collection string) 
 	if dbName == "" || collection == "" {
 		return nil
 	}
-	if !isSafeIdentifier(dbName) {
+	if !shared.IsSafeIdentifier(dbName) {
 		return fmt.Errorf("invalid database name: %s", dbName)
 	}
-	if !isSafeIdentifier(collection) {
+	if !shared.IsSafeIdentifier(collection) {
 		return fmt.Errorf("invalid collection name: %s", collection)
 	}
 
@@ -177,7 +177,7 @@ func (h *Handler) catalogUpsert(ctx context.Context, dbName, collection string) 
 		return nil
 	}
 
-	docJSON, err := marshalObject(bson.M{
+	docJSON, err := shared.MarshalObject(bson.M{
 		"db":   dbName,
 		"coll": collection,
 	})
@@ -354,7 +354,7 @@ func (h *Handler) catalogListDatabases(ctx context.Context) ([]string, error) {
 			case []byte:
 				db = string(t)
 			default:
-				data, okDoc := coerceBsonM(v)
+				data, okDoc := shared.CoerceBsonM(v)
 				if !okDoc {
 					continue
 				}
@@ -416,7 +416,7 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 	if dbName == "" {
 		return []string{}, nil
 	}
-	if !isSafeIdentifier(dbName) {
+	if !shared.IsSafeIdentifier(dbName) {
 		return []string{}, fmt.Errorf("invalid database name: %s", dbName)
 	}
 	if err := h.ensureCatalogTable(ctx); err != nil {
@@ -493,7 +493,7 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 			case []byte:
 				coll = string(t)
 			default:
-				data, okDoc := coerceBsonM(v)
+				data, okDoc := shared.CoerceBsonM(v)
 				if !okDoc {
 					continue
 				}
@@ -523,7 +523,7 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 					if err := legacyRows.Scan(&v); err != nil {
 						continue
 					}
-					data, okDoc := coerceBsonM(v)
+					data, okDoc := shared.CoerceBsonM(v)
 					if !okDoc {
 						continue
 					}
@@ -673,156 +673,4 @@ func (h *Handler) listDocTables(ctx context.Context) ([]string, error) {
 	}
 	// Otherwise, return the last error so callers can decide how to behave.
 	return nil, lastErr
-}
-
-func marshalObject(v interface{}) (string, error) {
-	// Prefer mgo/bson's JSON marshaler so BSON-specific types produced by drivers
-	// (e.g. ObjectId, Date, Binary) become valid JSON.
-	if b, err := bson.MarshalJSON(v); err == nil {
-		return string(b), nil
-	}
-
-	b, err := json.Marshal(v)
-	if err != nil {
-		return "", fmt.Errorf("failed to marshal object: %w", err)
-	}
-	return string(b), nil
-}
-
-// orderTopLevelDocForReply makes field order stable for clients:
-// `_id` first, then remaining top-level keys in alphabetical order.
-// This avoids expensive recursive ordering on large result batches.
-func orderTopLevelDocForReply(m bson.M) bson.D {
-	if m == nil {
-		return bson.D{}
-	}
-	keys := make([]string, 0, len(m))
-	for k := range m {
-		if k == "" || k == "_id" {
-			continue
-		}
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-
-	out := make(bson.D, 0, len(m))
-	if id, ok := m["_id"]; ok {
-		out = append(out, bson.DocElem{Name: "_id", Value: id})
-	}
-	for _, k := range keys {
-		out = append(out, bson.DocElem{Name: k, Value: m[k]})
-	}
-	return out
-}
-
-func coerceBsonM(v interface{}) (bson.M, bool) {
-	switch t := v.(type) {
-	case bson.M:
-		return t, true
-	case map[string]interface{}:
-		return bson.M(t), true
-	case bson.D:
-		m := bson.M{}
-		for _, e := range t {
-			m[e.Name] = e.Value
-		}
-		return m, true
-	case []byte:
-		var m bson.M
-		if err := bson.Unmarshal(t, &m); err == nil {
-			return m, true
-		}
-		if err := bson.UnmarshalJSON(t, &m); err == nil {
-			return m, true
-		}
-		return nil, false
-	case string:
-		var m bson.M
-		if err := bson.UnmarshalJSON([]byte(t), &m); err == nil {
-			return m, true
-		}
-		return nil, false
-	default:
-		return nil, false
-	}
-}
-
-func filterHasOperator(filter bson.M, op string) bool {
-	for _, v := range filter {
-		m, ok := coerceBsonM(v)
-		if !ok {
-			continue
-		}
-		if _, ok := m[op]; ok {
-			return true
-		}
-	}
-	return false
-}
-
-func stripOperatorKeys(filter bson.M, op string) bson.M {
-	if len(filter) == 0 {
-		return filter
-	}
-	out := bson.M{}
-	for k, v := range filter {
-		m, ok := coerceBsonM(v)
-		if ok {
-			if _, has := m[op]; has {
-				// If a field condition uses the operator (even alongside others), drop it from pushdown.
-				continue
-			}
-		}
-		out[k] = v
-	}
-	return out
-}
-
-func primaryCommandKey(cmd bson.M) string {
-	// Return the "command name" key for logging purposes.
-	// Skip metadata keys that frequently appear in command documents.
-	skip := map[string]bool{
-		"$db":             true,
-		"lsid":            true,
-		"$clusterTime":    true,
-		"txnNumber":       true,
-		"autocommit":      true,
-		"$readPreference": true,
-		"readConcern":     true,
-		"writeConcern":    true,
-		"client":          true,
-	}
-
-	var keys []string
-	for k := range cmd {
-		if skip[k] {
-			continue
-		}
-		keys = append(keys, k)
-	}
-	if len(keys) == 0 {
-		return ""
-	}
-	sort.Strings(keys)
-	return keys[0]
-}
-
-func commandDB(cmd bson.M) string {
-	if v, ok := cmd["$db"]; ok {
-		if s, ok := asString(v); ok {
-			return s
-		}
-	}
-	return ""
-}
-
-func asString(v interface{}) (string, bool) {
-	switch t := v.(type) {
-	case string:
-		return t, true
-	case bson.Symbol:
-		return string(t), true
-	default:
-		return "", false
-	}
 }

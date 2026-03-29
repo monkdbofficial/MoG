@@ -1,6 +1,7 @@
 package logging
 
 import (
+	"encoding/json"
 	"os"
 
 	"go.uber.org/zap"
@@ -196,11 +197,18 @@ func (e *colorfulConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zapco
 			line.WriteString(`"`)
 			line.WriteString(colorReset)
 			line.WriteString(": ")
-			// Use standard JSON encoder for the value to be safe
-			valBuf, _ := e.Encoder.EncodeEntry(entry, []zapcore.Field{f})
-			// Strip the outer JSON structure if possible or just use the raw value
-			line.Write(valBuf.Bytes())
-			valBuf.Free()
+			// Encode only the field value (not the entire log entry).
+			m := zapcore.NewMapObjectEncoder()
+			f.AddTo(m)
+			if v, ok := m.Fields[f.Key]; ok {
+				if b, err := json.Marshal(v); err == nil {
+					line.Write(b)
+				} else {
+					line.WriteString(`"unmarshalable"`)
+				}
+			} else {
+				line.WriteString("null")
+			}
 		}
 		line.WriteString("}")
 	}

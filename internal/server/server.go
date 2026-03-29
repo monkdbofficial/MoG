@@ -15,7 +15,7 @@ import (
 
 	"mog/internal/config"
 	"mog/internal/logging"
-	"mog/internal/mongo"
+	mongo "mog/internal/mongo/handler"
 	mwire "mog/internal/mongo/wire"
 	"mog/internal/translator"
 )
