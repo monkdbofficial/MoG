@@ -3,6 +3,7 @@ package mongo
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -65,6 +66,27 @@ func (h *Handler) loadSQLDocsWithIDs(ctx context.Context, exec DBExecutor, physi
 		return []pureSQLDoc{}, nil
 	}
 	return h.loadSQLDocsWithIDsQuery(ctx, exec, "SELECT * FROM doc."+physical)
+}
+
+func (h *Handler) docExistsByID(ctx context.Context, exec DBExecutor, physical string, docID string) (bool, error) {
+	if exec == nil {
+		return false, fmt.Errorf("db executor is nil")
+	}
+	if physical == "" || docID == "" {
+		return false, nil
+	}
+	var one int
+	err := exec.QueryRow(ctx, "SELECT 1 FROM doc."+physical+" WHERE id = $1 LIMIT 1", docID).Scan(&one)
+	if err == nil {
+		return true, nil
+	}
+	if errors.Is(err, pgx.ErrNoRows) {
+		return false, nil
+	}
+	if isUndefinedRelation(err) || isUndefinedSchema(err) {
+		return false, nil
+	}
+	return false, err
 }
 
 func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, query string, args ...interface{}) ([]pureSQLDoc, error) {
@@ -174,6 +196,9 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 			}
 			doc[k] = v
 		}
+		// Normalize so any backend-emitted Extended JSON wrappers (e.g. $numberLong)
+		// are rehydrated before we do in-memory match/update logic.
+		normalizeDocForReply(doc)
 		out = append(out, pureSQLDoc{docID: docID, doc: doc})
 	}
 	return out, nil

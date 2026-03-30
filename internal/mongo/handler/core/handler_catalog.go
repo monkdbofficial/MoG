@@ -113,7 +113,7 @@ func (h *Handler) ensureCatalogTable(ctx context.Context) error {
 
 	_ = h.ensureDocSchema(ctx)
 
-	// v2 schema (no PRIMARY KEY): some MonkDB/Crate-like backends reject PRIMARY KEY syntax.
+	// v2 schema (no PRIMARY KEY)
 	// We rely on best-effort dedupe in catalogUpsert instead of strict constraints.
 	if _, err := h.pool.Exec(ctx, "CREATE TABLE IF NOT EXISTS doc."+catalogCollection+" (id TEXT, db TEXT, coll TEXT, data OBJECT(DYNAMIC))"); err != nil {
 		return err
@@ -626,7 +626,7 @@ func (h *Handler) listDocTables(ctx context.Context) ([]string, error) {
 	}
 
 	queries := []string{
-		// CrateDB/MonkDB-like system catalog (often more reliable than information_schema).
+		// MonkDB-like system catalog (often more reliable than information_schema).
 		"SELECT name FROM sys.tables WHERE schema_name = 'doc'",
 		"SELECT table_name FROM sys.tables WHERE schema_name = 'doc'",
 		"SELECT table_name FROM sys.tables WHERE table_schema = 'doc'",

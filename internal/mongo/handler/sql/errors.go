@@ -59,7 +59,7 @@ func IsUniqueViolation(err error) bool {
 		if pgErr.Code == "23505" {
 			return true
 		}
-		// MonkDB/Crate-like backends sometimes use custom messages.
+		// MonkDB backends sometimes use custom messages.
 		msg := strings.ToLower(pgErr.Message)
 		if strings.Contains(msg, "duplicate key") || strings.Contains(msg, "unique") {
 			return true

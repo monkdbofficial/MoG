@@ -151,7 +151,8 @@ func TestCoerceBsonM(t *testing.T) {
 }
 
 func TestMarshalObject(t *testing.T) {
-	got, err := MarshalObject(bson.M{"_id": bson.NewObjectId(), "n": 1})
+	// Use a normalized value for _id to avoid relying on mgo/bson's Extended JSON wrappers.
+	got, err := MarshalObject(bson.M{"_id": bson.NewObjectId().Hex(), "n": int64(1)})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

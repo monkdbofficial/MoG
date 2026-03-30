@@ -285,6 +285,24 @@ func (h *Handler) handleOpMsgCommand(ctx context.Context, op *mwire.OpMsg, cmd b
 		return h.newMsg(op.Header.RequestID, bson.M{"ok": 1.0})
 	}
 
+	// PyMongo server_info() calls buildInfo/buildinfo.
+	if _, ok := cmd["buildInfo"]; ok {
+		return h.newMsg(op.Header.RequestID, bson.M{
+			"version":      reportedMongoVersion,
+			"versionArray": []int32{8, 0, 0, 0},
+			"gitVersion":   adapterGitVersion,
+			"ok":           1.0,
+		})
+	}
+	if _, ok := cmd["buildinfo"]; ok {
+		return h.newMsg(op.Header.RequestID, bson.M{
+			"version":      reportedMongoVersion,
+			"versionArray": []int32{8, 0, 0, 0},
+			"gitVersion":   adapterGitVersion,
+			"ok":           1.0,
+		})
+	}
+
 	if _, ok := cmd["connectionStatus"]; ok {
 		resp := bson.M{
 			"authInfo": bson.M{
