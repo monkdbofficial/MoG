@@ -39,6 +39,9 @@ func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []int
 		if err != nil {
 			return seen, inserted, err
 		}
+		if err := h.offloadBlobsInDoc(ctx, h.db(), physical, docID, doc); err != nil {
+			return seen, inserted, err
+		}
 		docs = append(docs, insertPreparedDoc{doc: doc, docID: docID})
 	}
 	if len(docs) == 0 && seen > 0 {

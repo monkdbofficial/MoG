@@ -136,7 +136,7 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 			if col == "data" {
 				// When enabled, `data` stores the raw Mongo document (including arrays).
 				// Keep it internal: only used for reconstruction and uniqueness checks.
-				if h.storeRawMongoJSON && val != nil {
+				if val != nil {
 					if m, ok := shared.CoerceBsonM(val); ok {
 						rawDoc = m
 					}

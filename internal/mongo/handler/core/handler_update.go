@@ -73,6 +73,10 @@ func (h *Handler) applyDynamicUpdate(ctx context.Context, tx pgx.Tx, physical st
 		newDoc, _ := mupdate.ApplyUpdate(fd.doc, update)
 		normalizeDocForStorage(newDoc)
 
+		if err := h.offloadBlobsInDoc(ctx, tx, physical, fd.id, newDoc); err != nil {
+			return 0, 0, err
+		}
+
 		docJSON, err := shared.MarshalObject(newDoc)
 		if err != nil {
 			return 0, 0, err

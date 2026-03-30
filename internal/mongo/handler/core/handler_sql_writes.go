@@ -17,6 +17,9 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 	if exec == nil || physical == "" || docID == "" {
 		return nil
 	}
+	if err := h.offloadBlobsInDoc(ctx, exec, physical, docID, doc); err != nil {
+		return err
+	}
 	if err := h.ensureCollectionTableExec(ctx, exec, physical); err != nil {
 		return err
 	}
@@ -125,13 +128,12 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 	}
 
 	// Nothing to update besides id.
-	if len(setParts) == 0 {
-		return nil
-	}
-	args = append(args, docID)
-	sql := fmt.Sprintf("UPDATE doc.%s SET %s WHERE id = $%d", physical, strings.Join(setParts, ", "), len(args))
-	if _, err := exec.Exec(ctx, sql, args...); err != nil {
-		return err
+	if len(setParts) > 0 {
+		args = append(args, docID)
+		sql := fmt.Sprintf("UPDATE doc.%s SET %s WHERE id = $%d", physical, strings.Join(setParts, ", "), len(args))
+		if _, err := exec.Exec(ctx, sql, args...); err != nil {
+			return err
+		}
 	}
 
 	// Raw `data` sync: do it as a separate UPDATE. Some backends/versions behave
@@ -160,6 +162,9 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physical string, docID string, doc bson.M) error {
 	if exec == nil || physical == "" || docID == "" {
 		return nil
+	}
+	if err := h.offloadBlobsInDoc(ctx, exec, physical, docID, doc); err != nil {
+		return err
 	}
 	if err := h.ensureCollectionTableExec(ctx, exec, physical); err != nil {
 		return err

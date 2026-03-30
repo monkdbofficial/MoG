@@ -182,6 +182,13 @@ func normalizeValueForStorage(v interface{}) interface{} {
 			m[e.Name] = e.Value
 		}
 		return normalizeValueForStorage(m)
+	case []byte:
+		// Many drivers decode BSON binary into raw []byte when unmarshalling into interface{}.
+		// Store it as a JSON-safe wrapper so it can round-trip and be eligible for BLOB offload.
+		return bson.M{
+			mogBinKey:     base64.StdEncoding.EncodeToString(t),
+			mogBinKindKey: int32(0),
+		}
 	case bson.Binary:
 		// Keep binary data representable inside OBJECT(DYNAMIC) without requiring backend-specific
 		// binary handling.

@@ -180,6 +180,7 @@ func TestNormalizeDocForStorage_UnsupportedBsonTypesAreMadeSQLSafe(t *testing.T)
 		"_id": bson.NewObjectId(),
 		"raw": bson.M{
 			"bin":   bson.Binary{Kind: 0x80, Data: []byte{0x00, 0x01, 0x02}},
+			"bytes": []byte{0x01, 0x02, 0x03},
 			"code":  bson.JavaScript{Code: "function(x){return x+1;}", Scope: bson.M{"a": 1}},
 			"ptr":   bson.DBPointer{Namespace: "missions", Id: bson.NewObjectId()},
 			"regex": bson.RegEx{Pattern: "^MOG_", Options: "i"},
@@ -200,5 +201,29 @@ func TestNormalizeDocForStorage_UnsupportedBsonTypesAreMadeSQLSafe(t *testing.T)
 		case bson.Binary, bson.JavaScript, bson.DBPointer, bson.RegEx, bson.Raw:
 			t.Fatalf("expected %s to be normalized to JSON-safe types, got %T", k, v)
 		}
+	}
+}
+
+func TestNormalizeDocForStorage_BytesRoundTripAsBinary(t *testing.T) {
+	doc := bson.M{
+		"_id":  bson.NewObjectId(),
+		"data": []byte{0x00, 0x01, 0x02, 0x03},
+	}
+
+	normalizeDocForStorage(doc)
+	if _, ok := doc["data"].(bson.M); !ok {
+		t.Fatalf("expected data to be wrapped as bson.M, got %T", doc["data"])
+	}
+
+	normalizeDocForReply(doc)
+	bin, ok := doc["data"].(bson.Binary)
+	if !ok {
+		t.Fatalf("expected data to be bson.Binary after reply normalize, got %T", doc["data"])
+	}
+	if bin.Kind != 0 {
+		t.Fatalf("expected kind=0, got %d", bin.Kind)
+	}
+	if len(bin.Data) != 4 || bin.Data[0] != 0x00 || bin.Data[3] != 0x03 {
+		t.Fatalf("unexpected data bytes: %#v", bin.Data)
 	}
 }

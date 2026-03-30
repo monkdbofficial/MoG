@@ -37,8 +37,19 @@ func TestApplyUpdate_Inc_MissingTreatZero(t *testing.T) {
 	update := bson.M{"$inc": bson.M{"counter.value": 5}}
 
 	out, _ := ApplyUpdate(doc, update)
-	if mpipeline.GetPathValue(out, "counter.value") != float64(5) {
+	if mpipeline.GetPathValue(out, "counter.value") != 5 {
 		t.Fatalf("expected counter.value=5, got %#v", mpipeline.GetPathValue(out, "counter.value"))
+	}
+}
+
+func TestApplyUpdate_Inc_PreservesInt32(t *testing.T) {
+	doc := bson.M{"age": int32(25)}
+	update := bson.M{"$inc": bson.M{"age": int32(5)}}
+
+	out, _ := ApplyUpdate(doc, update)
+	got := mpipeline.GetPathValue(out, "age")
+	if got != int32(30) {
+		t.Fatalf("expected age=int32(30), got %#v (%T)", got, got)
 	}
 }
 
