@@ -98,7 +98,9 @@ func (h *Handler) opmsgDeps() opmsg.Deps {
 		MarkTouched:    h.markTouched,
 		RefreshTouched: h.refreshTouched,
 
-		NormalizeDocForReply:     normalizeDocForReply,
+		NormalizeDocForReply: func(ctx context.Context, doc bson.M) error {
+			return h.normalizeDocForReplyWithBlobs(ctx, doc)
+		},
 		OrderTopLevelDocForReply: shared.OrderTopLevelDocForReply,
 
 		IsUndefinedRelation: isUndefinedRelation,

@@ -18,6 +18,13 @@ import (
 	"mog/internal/logging"
 )
 
+func (h *Handler) blobHTTPClient() *http.Client {
+	if h != nil && h.blobHTTPTransport != nil {
+		return &http.Client{Timeout: h.httpTimeout(), Transport: h.blobHTTPTransport}
+	}
+	return &http.Client{Timeout: h.httpTimeout()}
+}
+
 func (h *Handler) ensureBlobInfra(ctx context.Context) error {
 	if !h.blobEnabled() {
 		return nil
@@ -186,7 +193,7 @@ func (h *Handler) putBlob(ctx context.Context, table string, sha1hex string, dat
 	}
 	req.Header.Set("Content-Type", "application/octet-stream")
 
-	client := &http.Client{Timeout: h.httpTimeout()}
+	client := h.blobHTTPClient()
 	resp, err := client.Do(req)
 	if err != nil {
 		return err
@@ -199,6 +206,47 @@ func (h *Handler) putBlob(ctx context.Context, table string, sha1hex string, dat
 		return nil
 	}
 	return fmt.Errorf("blob upload failed: %s", resp.Status)
+}
+
+func (h *Handler) getBlob(ctx context.Context, table string, sha1hex string, maxBytes int) ([]byte, error) {
+	if strings.TrimSpace(table) == "" || sha1hex == "" {
+		return nil, fmt.Errorf("invalid blob source")
+	}
+	base := strings.TrimRight(strings.TrimSpace(h.blobHTTPBase), "/")
+	if base == "" {
+		base = "http://localhost:6000"
+	}
+	url := base + "/_blobs/" + table + "/" + sha1hex
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+
+	client := h.blobHTTPClient()
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != 200 {
+		_, _ = io.Copy(io.Discard, resp.Body)
+		return nil, fmt.Errorf("blob download failed: %s", resp.Status)
+	}
+
+	var r io.Reader = resp.Body
+	if maxBytes > 0 {
+		r = io.LimitReader(resp.Body, int64(maxBytes)+1)
+	}
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, err
+	}
+	if maxBytes > 0 && len(data) > maxBytes {
+		return nil, fmt.Errorf("blob download exceeded max bytes (%d)", maxBytes)
+	}
+	return data, nil
 }
 
 func (h *Handler) insertBlobMetadataBestEffort(ctx context.Context, exec DBExecutor, sha1hex string, logicalPath string, contentType string, physical string, docID string) error {
@@ -245,3 +293,123 @@ func joinPath(prefix, key string) string {
 	return prefix + "." + key
 }
 
+func (h *Handler) normalizeDocForReplyWithBlobs(ctx context.Context, doc bson.M) error {
+	normalizeDocForReply(doc)
+	return h.inlineBlobsForReply(ctx, doc)
+}
+
+func (h *Handler) inlineBlobsForReply(ctx context.Context, doc bson.M) error {
+	if !h.blobInlineReads || doc == nil {
+		return nil
+	}
+
+	cache := map[string][]byte{} // "table:sha1" -> bytes
+
+	var walk func(v interface{}) (interface{}, error)
+	walk = func(v interface{}) (interface{}, error) {
+		switch t := v.(type) {
+		case bson.M:
+			// Stored BLOB pointer wrapper:
+			// {"__mog_blob__": {"table": "...", "sha1": "...", "len": <n>, "kind": <k>}}
+			if len(t) == 1 {
+				if rawPtr, ok := t["__mog_blob__"]; ok && rawPtr != nil {
+					ptr, okPtr := rawPtr.(bson.M)
+					if !okPtr {
+						if mm, ok2 := rawPtr.(map[string]interface{}); ok2 {
+							ptr = bson.M(mm)
+							okPtr = true
+						}
+					}
+					if okPtr {
+						table, _ := ptr["table"].(string)
+						sha1hex, _ := ptr["sha1"].(string)
+						if table != "" && sha1hex != "" {
+							declLen := int64(0)
+							switch n := ptr["len"].(type) {
+							case int64:
+								declLen = n
+							case int32:
+								declLen = int64(n)
+							case int:
+								declLen = int64(n)
+							case float64:
+								declLen = int64(n)
+							}
+							max := h.blobInlineMaxBytes
+							if max > 0 && declLen > 0 && declLen > int64(max) {
+								if h.blobInlineStrict {
+									return nil, fmt.Errorf("blob inline blocked: len %d exceeds max %d", declLen, max)
+								}
+								return v, nil
+							}
+
+							kind := byte(0)
+							switch kk := ptr["kind"].(type) {
+							case int32:
+								kind = byte(kk)
+							case int64:
+								kind = byte(kk)
+							case int:
+								kind = byte(kk)
+							case float64:
+								kind = byte(int64(kk))
+							}
+
+							key := table + ":" + sha1hex
+							data, ok := cache[key]
+							if !ok {
+								b, err := h.getBlob(ctx, table, sha1hex, max)
+								if err != nil {
+									if h.blobInlineStrict {
+										return nil, err
+									}
+									if logging.Logger() != nil {
+										logging.Logger().Debug("blob inline download failed", zap.Error(err), zap.String("table", table), zap.String("sha1", sha1hex))
+									}
+									return v, nil
+								}
+								data = b
+								cache[key] = b
+							}
+							return bson.Binary{Kind: kind, Data: data}, nil
+						}
+					}
+				}
+			}
+
+			out := bson.M{}
+			for k, vv := range t {
+				nv, err := walk(vv)
+				if err != nil {
+					return nil, err
+				}
+				out[k] = nv
+			}
+			return out, nil
+		case map[string]interface{}:
+			m := bson.M(t)
+			return walk(m)
+		case []interface{}:
+			out := make([]interface{}, 0, len(t))
+			for _, el := range t {
+				nv, err := walk(el)
+				if err != nil {
+					return nil, err
+				}
+				out = append(out, nv)
+			}
+			return out, nil
+		default:
+			return v, nil
+		}
+	}
+
+	for k, v := range doc {
+		nv, err := walk(v)
+		if err != nil {
+			return err
+		}
+		doc[k] = nv
+	}
+	return nil
+}

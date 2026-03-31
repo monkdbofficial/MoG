@@ -2,6 +2,7 @@ package mongo
 
 import (
 	"context"
+	"net/http"
 	"os"
 	"strconv"
 	"strings"
@@ -42,6 +43,10 @@ type Handler struct {
 	blobMinBytes   int
 	blobMetaEnable bool
 	blobMetaTable  string
+	blobInlineReads   bool
+	blobInlineMaxBytes int
+	blobInlineStrict  bool
+	blobHTTPTransport http.RoundTripper
 	blobOnce       sync.Once
 	blobInitErr    error
 
@@ -68,6 +73,9 @@ func NewHandler(pool *pgxpool.Pool, t *translator.Translator, scram *ScramSha256
 		blobMinBytes: envInt("MOG_BLOB_MIN_BYTES", 256),
 		blobMetaEnable: envBool("MOG_BLOB_METADATA", false),
 		blobMetaTable:  strings.TrimSpace(envString("MOG_BLOB_METADATA_TABLE", "doc.blob_metadata")),
+		blobInlineReads:    envBool("MOG_BLOB_INLINE_READS", false),
+		blobInlineMaxBytes: envInt("MOG_BLOB_INLINE_MAX_BYTES", 1024*1024),
+		blobInlineStrict:   envBool("MOG_BLOB_INLINE_STRICT", false),
 	}
 }
 
