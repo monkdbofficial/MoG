@@ -50,7 +50,7 @@ type Deps struct {
 	MarkTouched    func(physical string)
 	RefreshTouched func(ctx context.Context)
 
-	NormalizeDocForReply     func(doc bson.M)
+	NormalizeDocForReply     func(ctx context.Context, doc bson.M) error
 	OrderTopLevelDocForReply func(m bson.M) bson.D
 
 	IsUndefinedRelation func(err error) bool

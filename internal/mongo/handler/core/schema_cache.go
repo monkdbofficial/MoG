@@ -2,6 +2,7 @@ package mongo
 
 import (
 	"context"
+	"sort"
 	"strings"
 	"sync"
 
@@ -145,7 +146,25 @@ func (h *Handler) listColumnsExec(ctx context.Context, exec DBExecutor, physical
 	if exec == nil || physical == "" {
 		return nil, nil
 	}
-	// Try a few variants for MonkDB/Crate compatibility.
+	// Hot path: if we already initialized and cached the table schema in this
+	// process, avoid hitting information_schema on every write.
+	if c := h.schemaCache(); c != nil && c.isInitialized(physical) {
+		if t := c.get(physical); t != nil && len(t.columns) > 0 {
+			cols := make([]string, 0, len(t.columns))
+			c.mu.RLock()
+			for col := range t.columns {
+				if col == "" {
+					continue
+				}
+				cols = append(cols, strings.ToLower(col))
+			}
+			c.mu.RUnlock()
+			sort.Strings(cols)
+			return cols, nil
+		}
+	}
+
+	// Try a few variants for MonkDB compatibility.
 	var rows pgx.Rows
 	var err error
 	for _, q := range []string{

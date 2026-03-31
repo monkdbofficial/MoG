@@ -124,7 +124,9 @@ func CmdFind(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byt
 		docs = mpipeline.ApplyMatch(docs, filter)
 	}
 	for _, d := range docs {
-		deps.NormalizeDocForReply(d)
+		if err := deps.NormalizeDocForReply(ctx, d); err != nil {
+			return nil, true, err
+		}
 	}
 
 	if logging.Logger() != nil {

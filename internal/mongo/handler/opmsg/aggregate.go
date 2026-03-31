@@ -64,7 +64,9 @@ func CmdAggregate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) (
 		return nil, true, err
 	}
 	for _, d := range outDocs {
-		deps.NormalizeDocForReply(d)
+		if err := deps.NormalizeDocForReply(ctx, d); err != nil {
+			return nil, true, err
+		}
 	}
 	var firstBatch interface{} = outDocs
 	if deps.StableFieldOrder {

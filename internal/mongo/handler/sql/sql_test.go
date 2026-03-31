@@ -23,25 +23,24 @@ func TestTypeForValue(t *testing.T) {
 	if got := TypeForValue(bson.Symbol("x")); got != "TEXT" {
 		t.Fatalf("unexpected symbol type: %q", got)
 	}
-	if got := TypeForValue(1); got != "DOUBLE PRECISION" {
+	if got := TypeForValue(1); got != "LONG" {
 		t.Fatalf("unexpected int type: %q", got)
 	}
 	if got := TypeForValue(1.5); got != "DOUBLE PRECISION" {
 		t.Fatalf("unexpected float type: %q", got)
 	}
-	if got := TypeForValue(time.Now()); got != "TIMESTAMP" {
+	if got := TypeForValue(time.Now()); got != "TIMESTAMP WITH TIME ZONE" {
 		t.Fatalf("unexpected time type: %q", got)
 	}
 	if got := TypeForValue(bson.M{"a": 1}); got != "OBJECT(DYNAMIC)" {
 		t.Fatalf("unexpected object type: %q", got)
 	}
 
-	// numeric arrays are treated as vectors (up to a bounded length)
-	if got := TypeForValue([]int{1, 2, 3}); got != "FLOAT_VECTOR(3)" {
-		t.Fatalf("unexpected vector type: %q", got)
+	// arrays are stored as typed ARRAY(...) when a stable element type can be inferred
+	if got := TypeForValue([]int{1, 2, 3}); got != "ARRAY(LONG)" {
+		t.Fatalf("unexpected int-array type: %q", got)
 	}
-	// non-numeric arrays are stored as JSON in TEXT columns
-	if got := TypeForValue([]string{"a", "b"}); got != "TEXT" {
+	if got := TypeForValue([]string{"a", "b"}); got != "ARRAY(TEXT)" {
 		t.Fatalf("unexpected string-array type: %q", got)
 	}
 }
@@ -66,6 +65,24 @@ func TestFloatVectorLiteral(t *testing.T) {
 	}
 	if _, _, ok := FloatVectorLiteral([]interface{}{"x"}); ok {
 		t.Fatalf("expected non-numeric element to be rejected")
+	}
+}
+
+func TestArrayArgForSQLType(t *testing.T) {
+	v, err := ArrayArgForSQLType([]interface{}{"a", "b"}, "ARRAY(TEXT)")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := v.([]string); !ok {
+		t.Fatalf("expected []string, got %T", v)
+	}
+
+	v, err = ArrayArgForSQLType([]interface{}{1, 2, 3}, "ARRAY(LONG)")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, ok := v.([]int64); !ok {
+		t.Fatalf("expected []int64, got %T", v)
 	}
 }
 

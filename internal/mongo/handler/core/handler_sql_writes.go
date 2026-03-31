@@ -17,6 +17,9 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 	if exec == nil || physical == "" || docID == "" {
 		return nil
 	}
+	if err := h.offloadBlobsInDoc(ctx, exec, physical, docID, doc); err != nil {
+		return err
+	}
 	if err := h.ensureCollectionTableExec(ctx, exec, physical); err != nil {
 		return err
 	}
@@ -30,7 +33,7 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 		if col == "" || col == "id" || col == "data" {
 			continue
 		}
-		sqlType := sqlTypeForValue(v)
+		sqlType := sqlTypeForField(k, v)
 		if sqlType == "" {
 			continue
 		}
@@ -62,7 +65,7 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 			continue
 		}
 
-		sqlType := sqlTypeForValue(v)
+		sqlType := sqlTypeForField(field, v)
 		switch sqlType {
 		case "OBJECT(DYNAMIC)":
 			js, err := shared.MarshalObject(v)
@@ -71,20 +74,31 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 			}
 			args = append(args, js)
 			setParts = append(setParts, fmt.Sprintf("%s = CAST($%d AS OBJECT(DYNAMIC))", c, len(args)))
-		case "DOUBLE PRECISION":
-			if f, ok := mpipeline.ToFloat64Match(v); ok {
-				args = append(args, f)
-			} else {
-				args = append(args, v)
-			}
-			setParts = append(setParts, fmt.Sprintf("%s = $%d", c, len(args)))
 		default:
+			if strings.HasPrefix(sqlType, "ARRAY(") {
+				av, err := arrayArgForSQLType(v, sqlType)
+				if err != nil {
+					return err
+				}
+				args = append(args, av)
+				setParts = append(setParts, fmt.Sprintf("%s = CAST($%d AS %s)", c, len(args), sqlType))
+				continue
+			}
 			if strings.HasPrefix(sqlType, "FLOAT_VECTOR(") {
 				lit, _, ok := floatVectorLiteral(v)
 				if !ok {
 					return fmt.Errorf("invalid FLOAT_VECTOR value for field %q", field)
 				}
 				setParts = append(setParts, fmt.Sprintf("%s = %s", c, lit))
+				continue
+			}
+			if sqlType == "DOUBLE PRECISION" {
+				if f, ok := mpipeline.ToFloat64Match(v); ok {
+					args = append(args, f)
+				} else {
+					args = append(args, v)
+				}
+				setParts = append(setParts, fmt.Sprintf("%s = $%d", c, len(args)))
 				continue
 			}
 			// For TEXT columns, encode arrays/objects as JSON so they can be rehydrated on reads.
@@ -114,13 +128,12 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 	}
 
 	// Nothing to update besides id.
-	if len(setParts) == 0 {
-		return nil
-	}
-	args = append(args, docID)
-	sql := fmt.Sprintf("UPDATE doc.%s SET %s WHERE id = $%d", physical, strings.Join(setParts, ", "), len(args))
-	if _, err := exec.Exec(ctx, sql, args...); err != nil {
-		return err
+	if len(setParts) > 0 {
+		args = append(args, docID)
+		sql := fmt.Sprintf("UPDATE doc.%s SET %s WHERE id = $%d", physical, strings.Join(setParts, ", "), len(args))
+		if _, err := exec.Exec(ctx, sql, args...); err != nil {
+			return err
+		}
 	}
 
 	// Raw `data` sync: do it as a separate UPDATE. Some backends/versions behave
@@ -149,6 +162,9 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physical string, docID string, doc bson.M) error {
 	if exec == nil || physical == "" || docID == "" {
 		return nil
+	}
+	if err := h.offloadBlobsInDoc(ctx, exec, physical, docID, doc); err != nil {
+		return err
 	}
 	if err := h.ensureCollectionTableExec(ctx, exec, physical); err != nil {
 		return err
@@ -185,7 +201,7 @@ func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physica
 		if col == "" || col == "id" || col == "data" {
 			continue
 		}
-		sqlType := sqlTypeForValue(v)
+		sqlType := sqlTypeForField(k, v)
 		if sqlType == "" {
 			continue
 		}
@@ -205,20 +221,31 @@ func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physica
 			}
 			args = append(args, js)
 			exprs = append(exprs, fmt.Sprintf("CAST($%d AS OBJECT(DYNAMIC))", len(args)))
-		case "DOUBLE PRECISION":
-			if f, ok := mpipeline.ToFloat64Match(v); ok {
-				args = append(args, f)
-			} else {
-				args = append(args, v)
-			}
-			exprs = append(exprs, fmt.Sprintf("$%d", len(args)))
 		default:
+			if strings.HasPrefix(sqlType, "ARRAY(") {
+				av, err := arrayArgForSQLType(v, sqlType)
+				if err != nil {
+					return err
+				}
+				args = append(args, av)
+				exprs = append(exprs, fmt.Sprintf("CAST($%d AS %s)", len(args), sqlType))
+				continue
+			}
 			if strings.HasPrefix(sqlType, "FLOAT_VECTOR(") {
 				lit, _, ok := floatVectorLiteral(v)
 				if !ok {
 					return fmt.Errorf("invalid FLOAT_VECTOR value for field %q", k)
 				}
 				exprs = append(exprs, lit)
+				continue
+			}
+			if sqlType == "DOUBLE PRECISION" {
+				if f, ok := mpipeline.ToFloat64Match(v); ok {
+					args = append(args, f)
+				} else {
+					args = append(args, v)
+				}
+				exprs = append(exprs, fmt.Sprintf("$%d", len(args)))
 				continue
 			}
 			// For TEXT columns, encode arrays/objects as JSON so they can be rehydrated on reads.

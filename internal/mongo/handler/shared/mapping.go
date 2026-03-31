@@ -25,7 +25,7 @@ var FieldB32 = base32.StdEncoding.WithPadding(base32.NoPadding)
 
 func SQLColumnNameForField(field string) string {
 	// NOTE: MongoDB field names can't contain '.' (nested paths are expressed in queries), but they can
-	// start with '_' which conflicts with MonkDB/Crate system column patterns. We also reserve a few
+	// start with '_' which conflicts with MonkDB system column patterns. We also reserve a few
 	// internal columns (id/data). Everything else is deterministically mapped to a safe SQL identifier.
 	if field == "" {
 		return ""

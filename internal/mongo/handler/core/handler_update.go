@@ -73,6 +73,10 @@ func (h *Handler) applyDynamicUpdate(ctx context.Context, tx pgx.Tx, physical st
 		newDoc, _ := mupdate.ApplyUpdate(fd.doc, update)
 		normalizeDocForStorage(newDoc)
 
+		if err := h.offloadBlobsInDoc(ctx, tx, physical, fd.id, newDoc); err != nil {
+			return 0, 0, err
+		}
+
 		docJSON, err := shared.MarshalObject(newDoc)
 		if err != nil {
 			return 0, 0, err
@@ -108,6 +112,121 @@ func (h *Handler) applyPureSQLUpdate(ctx context.Context, exec DBExecutor, physi
 	}
 	if physical == "" {
 		return 0, 0, nil, fmt.Errorf("empty collection")
+	}
+
+	// Fast-path: the common PyMongo bulk_write(ReplaceOne(..., upsert=True)) pattern
+	// uses filter {"_id": <id>} and a full-document replacement update.
+	//
+	// The generic path loads *all* docs and does in-memory matching, which becomes
+	// quadratic for large collections. For _id-equality, we can push down existence
+	// checks and only read/modify a single row.
+	if !multi && len(filter) == 1 {
+		if rawID, ok := filter["_id"]; ok {
+			storageID, docID, okID, err := canonicalStorageIDAndDocID(rawID)
+			if err != nil {
+				return 0, 0, nil, err
+			}
+			if okID {
+				isReplacement := isReplacementUpdateDoc(update)
+				if isReplacement {
+					newDoc := cloneBsonM(update)
+					if _, hasID := newDoc["_id"]; !hasID {
+						newDoc["_id"] = storageID
+					}
+					normalizeDocForStorage(newDoc)
+					newDoc["_id"] = storageID
+
+					if err := h.ensureCollectionTableExec(ctx, exec, physical); err != nil {
+						return 0, 0, nil, err
+					}
+
+					exists, err := h.docExistsByID(ctx, exec, physical, docID)
+					if err != nil {
+						return 0, 0, nil, err
+					}
+					if !exists {
+						if !upsert {
+							return 0, 0, nil, nil
+						}
+						if dupMsg, dupName, ok := h.checkUniqueViolation(ctx, physical, docID, newDoc, ""); ok {
+							return 0, 0, nil, fmt.Errorf("E11000 duplicate key error collection: %s index: %s dup key: %s", physical, dupName, dupMsg)
+						}
+						if err := h.insertRowFromDoc(ctx, exec, physical, docID, newDoc); err != nil {
+							return 0, 0, nil, err
+						}
+						return 0, 0, newDoc["_id"], nil
+					}
+
+					// Best-effort modified semantics: compare with existing doc if we can load it cheaply.
+					if pds, err := h.loadSQLDocsWithIDsQuery(ctx, exec, "SELECT * FROM doc."+physical+" WHERE id = $1", docID); err == nil && len(pds) > 0 {
+						if reflect.DeepEqual(pds[0].doc, newDoc) {
+							modified = 0
+						} else {
+							modified = 1
+						}
+					} else {
+						modified = 1
+					}
+
+					if dupMsg, dupName, ok := h.checkUniqueViolation(ctx, physical, docID, newDoc, docID); ok {
+						return 1, modified, nil, fmt.Errorf("E11000 duplicate key error collection: %s index: %s dup key: %s", physical, dupName, dupMsg)
+					}
+					if err := h.updateRowFromDoc(ctx, exec, physical, docID, newDoc); err != nil {
+						return 1, modified, nil, err
+					}
+					return 1, modified, nil, nil
+				}
+
+				// Operator update fast-path (e.g. $set) for {"_id": ...} filters: load one doc,
+				// apply update in-memory, write back.
+				if err := h.ensureCollectionTableExec(ctx, exec, physical); err != nil {
+					return 0, 0, nil, err
+				}
+				exists, err := h.docExistsByID(ctx, exec, physical, docID)
+				if err != nil {
+					return 0, 0, nil, err
+				}
+				if !exists {
+					if !upsert {
+						return 0, 0, nil, nil
+					}
+					insDoc := mupdate.BuildUpsertBaseDoc(filter)
+					insDoc, _ = mupdate.ApplyUpdate(insDoc, update)
+					normalizeDocForStorage(insDoc)
+					insDoc["_id"] = storageID
+					if dupMsg, dupName, ok := h.checkUniqueViolation(ctx, physical, docID, insDoc, ""); ok {
+						return 0, 0, nil, fmt.Errorf("E11000 duplicate key error collection: %s index: %s dup key: %s", physical, dupName, dupMsg)
+					}
+					if err := h.insertRowFromDoc(ctx, exec, physical, docID, insDoc); err != nil {
+						return 0, 0, nil, err
+					}
+					return 0, 0, insDoc["_id"], nil
+				}
+
+				pds, err := h.loadSQLDocsWithIDsQuery(ctx, exec, "SELECT * FROM doc."+physical+" WHERE id = $1", docID)
+				if err != nil {
+					return 0, 0, nil, err
+				}
+				if len(pds) == 0 {
+					return 0, 0, nil, nil
+				}
+				old := pds[0].doc
+				newDoc, _ := mupdate.ApplyUpdate(old, update)
+				normalizeDocForStorage(newDoc)
+				newDoc["_id"] = storageID
+
+				if !reflect.DeepEqual(old, newDoc) {
+					modified = 1
+				}
+				if dupMsg, dupName, ok := h.checkUniqueViolation(ctx, physical, docID, newDoc, docID); ok {
+					return 1, modified, nil, fmt.Errorf("E11000 duplicate key error collection: %s index: %s dup key: %s", physical, dupName, dupMsg)
+				}
+				if err := h.updateRowFromDoc(ctx, exec, physical, docID, newDoc); err != nil {
+					return 1, modified, nil, err
+				}
+				return 1, modified, nil, nil
+			}
+		}
 	}
 
 	// Load all docs and apply the match/update in-memory for maximum Mongo compatibility.
@@ -173,4 +292,45 @@ func (h *Handler) applyPureSQLUpdate(ctx context.Context, exec DBExecutor, physi
 	}
 
 	return matched, modified, nil, nil
+}
+
+func isReplacementUpdateDoc(update bson.M) bool {
+	for k := range update {
+		if strings.HasPrefix(k, "$") {
+			return false
+		}
+	}
+	return true
+}
+
+func cloneBsonM(in bson.M) bson.M {
+	if in == nil {
+		return bson.M{}
+	}
+	out := make(bson.M, len(in))
+	for k, v := range in {
+		out[k] = v
+	}
+	return out
+}
+
+func canonicalStorageIDAndDocID(rawID interface{}) (storageID interface{}, docID string, ok bool, err error) {
+	if rawID == nil {
+		return nil, "", false, nil
+	}
+	// Coerce Extended JSON wrappers if the client sent them as an object.
+	if m, okM := shared.CoerceBsonM(rawID); okM {
+		if vv, okV := coerceExtendedJSONValue(m, false); okV {
+			rawID = vv
+		}
+	}
+	// Keep storage ids stable with normalizeDocForStorage behavior (ObjectId -> hex string).
+	if oid, okOID := rawID.(bson.ObjectId); okOID {
+		rawID = oid.Hex()
+	}
+	docID, err = encodeDocID(rawID)
+	if err != nil {
+		return nil, "", false, err
+	}
+	return rawID, docID, true, nil
 }

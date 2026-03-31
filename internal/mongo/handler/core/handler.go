@@ -2,8 +2,12 @@ package mongo
 
 import (
 	"context"
+	"net/http"
 	"os"
+	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgconn"
@@ -33,6 +37,19 @@ type Handler struct {
 	logWriteInfo      bool
 	stableFieldOrder  bool
 
+	blobTable      string
+	blobHTTPBase   string
+	blobShards     int
+	blobMinBytes   int
+	blobMetaEnable bool
+	blobMetaTable  string
+	blobInlineReads   bool
+	blobInlineMaxBytes int
+	blobInlineStrict  bool
+	blobHTTPTransport http.RoundTripper
+	blobOnce       sync.Once
+	blobInitErr    error
+
 	// scram conversation
 	scram         *ScramSha256
 	scramConv     *Conversation
@@ -50,7 +67,35 @@ func NewHandler(pool *pgxpool.Pool, t *translator.Translator, scram *ScramSha256
 		stableFieldOrder:  envBool("MOG_STABLE_FIELD_ORDER", false),
 		// Minimal info-level write logging is opt-in to avoid performance overhead under high QPS.
 		logWriteInfo: envBool("MOG_INFO_LOG_WRITES", false),
+		blobTable:    strings.TrimSpace(os.Getenv("MOG_BLOB_TABLE")),
+		blobHTTPBase: strings.TrimSpace(envString("MOG_BLOB_HTTP_BASE", "http://localhost:6000")),
+		blobShards:   envInt("MOG_BLOB_SHARDS", 3),
+		blobMinBytes: envInt("MOG_BLOB_MIN_BYTES", 256),
+		blobMetaEnable: envBool("MOG_BLOB_METADATA", false),
+		blobMetaTable:  strings.TrimSpace(envString("MOG_BLOB_METADATA_TABLE", "doc.blob_metadata")),
+		blobInlineReads:    envBool("MOG_BLOB_INLINE_READS", false),
+		blobInlineMaxBytes: envInt("MOG_BLOB_INLINE_MAX_BYTES", 1024*1024),
+		blobInlineStrict:   envBool("MOG_BLOB_INLINE_STRICT", false),
 	}
+}
+
+func envString(key, def string) string {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	return v
+}
+
+func envInt(key string, def int) int {
+	v := strings.TrimSpace(os.Getenv(key))
+	if v == "" {
+		return def
+	}
+	if n, err := strconv.Atoi(v); err == nil {
+		return n
+	}
+	return def
 }
 
 func envBool(key string, def bool) bool {
@@ -66,6 +111,14 @@ func envBool(key string, def bool) bool {
 	default:
 		return def
 	}
+}
+
+func (h *Handler) blobEnabled() bool {
+	return strings.TrimSpace(h.blobTable) != ""
+}
+
+func (h *Handler) httpTimeout() time.Duration {
+	return 30 * time.Second
 }
 
 func (h *Handler) db() DBExecutor {
@@ -101,7 +154,7 @@ func (h *Handler) refreshCollection(ctx context.Context, physical string) {
 		return
 	}
 	_ = h.ensureDocSchema(ctx)
-	// Best-effort: MonkDB/Crate-style backends are near-real-time; refresh makes writes visible to reads.
+	// Best-effort: MonkDB style backends are near-real-time; refresh makes writes visible to reads.
 	if _, err := h.pool.Exec(ctx, "REFRESH TABLE doc."+physical); err != nil {
 		// Don't fail the request if refresh isn't supported; just log at debug.
 		if logging.Logger() != nil {

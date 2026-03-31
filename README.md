@@ -62,6 +62,7 @@ MoG is designed for teams that like MongoDB’s developer experience, but want M
 - **Full CRUD Support**: Standard MongoDB `find`, `insert`, `update`, `delete`, and `count` operations.
 - **Smart Aggregation**: A hybrid pipeline engine that pushes matching, grouping, and sorting to SQL while evaluating the rest in Go.
 - **Dynamic Schema Management**: Automatically maps MongoDB documents to relational tables, creating columns as needed.
+- **BLOB Offload (Optional)**: Stores large `BinData` payloads in MonkDB **BLOB tables** via `/_blobs` HTTP endpoints, keeping documents SQL-safe while preserving Mongo semantics.
 - **Secure Authentication**: Built-in support for `SCRAM-SHA-256` authentication for secure client connections.
 - **High Availability**: Built with Go's standard library and `pgxpool` for robust connection management and scaling.
 - **Cloud-Native**: Includes a Prometheus exporter and pre-configured Grafana dashboards for monitoring performance.
@@ -176,6 +177,29 @@ MoG is configured via environment variables or a `.env` file.
 | `MOG_STORE_RAW_MONGO_JSON` | Mirror full document into a `data` column (`OBJECT(DYNAMIC)`). | `0` |
 | `MOG_STABLE_FIELD_ORDER` | Sort document fields for consistent output. | `0` |
 | `MOG_INFO_LOG_WRITES` | Enable info-level logs for write operations. | `0` |
+| `MOG_BLOB_TABLE` | Enable BLOB offload by setting a MonkDB BLOB table name. | _(empty)_ |
+| `MOG_BLOB_HTTP_BASE` | MonkDB HTTP base used for `/_blobs/<table>/<sha1>` PUT/GET/DELETE. | `http://localhost:6000` |
+| `MOG_BLOB_SHARDS` | Shard count used for best-effort BLOB table creation. | `3` |
+| `MOG_BLOB_MIN_BYTES` | Only offload binaries at or above this size (bytes). | `256` |
+| `MOG_BLOB_METADATA` | Enable creating/updating relational metadata rows for offloaded blobs. | `0` |
+| `MOG_BLOB_METADATA_TABLE` | Relational table used for blob metadata when enabled. | `doc.blob_metadata` |
+| `MOG_BLOB_INLINE_READS` | Inline blob content back into replies (dereference pointers). | `0` |
+| `MOG_BLOB_INLINE_MAX_BYTES` | Max bytes to inline per blob when inline reads enabled. | `1048576` |
+| `MOG_BLOB_INLINE_STRICT` | If `1`, error when blob can’t be inlined; if `0`, return pointer. | `0` |
+
+### BLOB Storage (Optional)
+
+MoG can offload large `BinData` fields to MonkDB BLOB tables to avoid oversized inline base64 payloads.
+
+1. Create a BLOB table:
+   ```sql
+   CREATE BLOB TABLE media CLUSTERED INTO 3 SHARDS;
+   ```
+2. Configure MoG:
+   ```bash
+   export MOG_BLOB_TABLE=media
+   export MOG_BLOB_HTTP_BASE=http://localhost:6000
+   ```
 
 ## Observability
 
@@ -216,7 +240,7 @@ If you discover a security vulnerability, please refer to [SECURITY.md](SECURITY
 
 ## License
 
-This project is licensed under the Apache License 2.0 - see the [LICENSE](LICENSE) file for details.
+This project is licensed under the Apache License 2.0 - see the [LICENSE.md](LICENSE.md) file for details.
 
 ## Citation
 

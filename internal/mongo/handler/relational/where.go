@@ -1,6 +1,7 @@
 package relational
 
 import (
+	"encoding/json"
 	"fmt"
 	"sort"
 	"strings"
@@ -13,6 +14,29 @@ import (
 type Where struct {
 	SQL  string
 	Args []interface{}
+}
+
+func normalizeIDForStorage(v interface{}) interface{} {
+	// MoG stores ObjectIds as hex strings for SQL compatibility.
+	if oid, ok := v.(bson.ObjectId); ok {
+		return oid.Hex()
+	}
+	return v
+}
+
+func encodeDocIDArg(v interface{}) (string, error) {
+	// Core stores `doc.id` as a JSON-encoded value (most commonly a JSON string literal).
+	// Mirror that here so relational pushdown can match by _id.
+	//
+	// Examples:
+	// - ObjectId("...") -> "\"<hex>\""
+	// - "abc" -> "\"abc\""
+	// - 123 -> "123"
+	b, err := json.Marshal(normalizeIDForStorage(v))
+	if err != nil {
+		return "", err
+	}
+	return string(b), nil
 }
 
 func BuildWhere(filter bson.M) (*Where, bool, error) {
@@ -52,6 +76,34 @@ func BuildWhere(filter bson.M) (*Where, bool, error) {
 
 			for _, op := range ops {
 				opVal := cond[op]
+				// Special-case _id: the column stores JSON-encoded doc ids.
+				if field == "_id" {
+					switch op {
+					case "$in":
+						list, ok := shared.CoerceInterfaceSlice(opVal)
+						if !ok || len(list) == 0 {
+							return nil, false, nil
+						}
+						placeholders := make([]string, 0, len(list))
+						for _, it := range list {
+							enc, err := encodeDocIDArg(it)
+							if err != nil {
+								return nil, false, err
+							}
+							placeholders = append(placeholders, fmt.Sprintf("$%d", argN))
+							args = append(args, enc)
+							argN++
+						}
+						parts = append(parts, fmt.Sprintf("%s IN (%s)", accessor, strings.Join(placeholders, ", ")))
+						continue
+					case "$ne", "$gt", "$gte", "$lt", "$lte":
+						enc, err := encodeDocIDArg(opVal)
+						if err != nil {
+							return nil, false, err
+						}
+						opVal = enc
+					}
+				}
 				switch op {
 				case "$gt", "$gte", "$lt", "$lte", "$ne":
 					sqlOp := map[string]string{"$gt": ">", "$gte": ">=", "$lt": "<", "$lte": "<=", "$ne": "!="}[op]
@@ -80,6 +132,15 @@ func BuildWhere(filter bson.M) (*Where, bool, error) {
 				}
 			}
 			continue
+		}
+
+		// Special-case _id equality.
+		if field == "_id" {
+			enc, err := encodeDocIDArg(val)
+			if err != nil {
+				return nil, false, err
+			}
+			val = enc
 		}
 
 		// Equality

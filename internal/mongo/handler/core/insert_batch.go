@@ -39,6 +39,9 @@ func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []int
 		if err != nil {
 			return seen, inserted, err
 		}
+		if err := h.offloadBlobsInDoc(ctx, h.db(), physical, docID, doc); err != nil {
+			return seen, inserted, err
+		}
 		docs = append(docs, insertPreparedDoc{doc: doc, docID: docID})
 	}
 	if len(docs) == 0 && seen > 0 {
@@ -62,7 +65,7 @@ func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []int
 			if col == "" || col == "id" || col == "data" {
 				continue
 			}
-			sqlType := sqlTypeForValue(v)
+			sqlType := sqlTypeForField(k, v)
 			if sqlType == "" {
 				continue
 			}
@@ -159,6 +162,14 @@ func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []int
 						argN++
 						args = append(args, js)
 						valExprs = append(valExprs, fmt.Sprintf("CAST($%d AS OBJECT(DYNAMIC))", argN))
+					case strings.HasPrefix(sqlType, "ARRAY("):
+						av, err := arrayArgForSQLType(v, sqlType)
+						if err != nil {
+							return seen, inserted, err
+						}
+						argN++
+						args = append(args, av)
+						valExprs = append(valExprs, fmt.Sprintf("CAST($%d AS %s)", argN, sqlType))
 					case strings.HasPrefix(sqlType, "FLOAT_VECTOR("):
 						lit, _, ok := floatVectorLiteral(v)
 						if !ok {
