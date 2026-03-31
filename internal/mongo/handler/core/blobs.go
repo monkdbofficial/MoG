@@ -18,11 +18,51 @@ import (
 	"mog/internal/logging"
 )
 
+// MonkDB/CrateDB string indexing is backed by Lucene, which enforces a maximum
+// term byte length (see Lucene's IndexWriter.MAX_TERM_LENGTH).
+// A base64-encoded blob has no natural token boundaries, so analyzers often emit
+// the full value as a single term, tripping the limit.
+const luceneMaxTermBytes = 32766
+
 func (h *Handler) blobHTTPClient() *http.Client {
 	if h != nil && h.blobHTTPTransport != nil {
 		return &http.Client{Timeout: h.httpTimeout(), Transport: h.blobHTTPTransport}
 	}
 	return &http.Client{Timeout: h.httpTimeout()}
+}
+
+func validateNoOversizeInlineBinary(v interface{}) error {
+	var walk func(v interface{}) error
+	walk = func(v interface{}) error {
+		switch t := v.(type) {
+		case bson.M:
+			if b64, ok := t[mogBinKey].(string); ok && b64 != "" && len(b64) > luceneMaxTermBytes {
+				return fmt.Errorf(
+					"inline BSON binary is too large to store without blob offload: base64 value is %d bytes (Lucene term limit %d). Set MOG_BLOB_TABLE (and MOG_BLOB_HTTP_BASE) to enable offload, or reduce payload size",
+					len(b64),
+					luceneMaxTermBytes,
+				)
+			}
+			for _, vv := range t {
+				if err := walk(vv); err != nil {
+					return err
+				}
+			}
+			return nil
+		case map[string]interface{}:
+			return walk(bson.M(t))
+		case []interface{}:
+			for _, el := range t {
+				if err := walk(el); err != nil {
+					return err
+				}
+			}
+			return nil
+		default:
+			return nil
+		}
+	}
+	return walk(v)
 }
 
 func (h *Handler) ensureBlobInfra(ctx context.Context) error {
@@ -75,8 +115,13 @@ CREATE TABLE IF NOT EXISTS %s (
 }
 
 func (h *Handler) offloadBlobsInDoc(ctx context.Context, exec DBExecutor, physical string, docID string, doc bson.M) error {
-	if !h.blobEnabled() || doc == nil {
+	if doc == nil {
 		return nil
+	}
+	if !h.blobEnabled() {
+		// Without blob offload, large base64-wrapped binaries can trigger backend "immense term"
+		// errors due to Lucene term size limits. Fail early with a clearer message.
+		return validateNoOversizeInlineBinary(doc)
 	}
 	if err := h.ensureBlobInfra(ctx); err != nil {
 		return err
@@ -90,6 +135,7 @@ func (h *Handler) offloadBlobsInDoc(ctx context.Context, exec DBExecutor, physic
 		case bson.M:
 			// Detect binary wrapper produced by normalizeValueForStorage.
 			if b64, ok := t[mogBinKey].(string); ok && b64 != "" {
+				forceOffload := len(b64) > luceneMaxTermBytes
 				kindV := t[mogBinKindKey]
 				kind := int32(0)
 				switch kk := kindV.(type) {
@@ -106,7 +152,7 @@ func (h *Handler) offloadBlobsInDoc(ctx context.Context, exec DBExecutor, physic
 				if err != nil {
 					return v, nil
 				}
-				if h.blobMinBytes > 0 && len(data) < h.blobMinBytes {
+				if !forceOffload && h.blobMinBytes > 0 && len(data) < h.blobMinBytes {
 					return v, nil
 				}
 
