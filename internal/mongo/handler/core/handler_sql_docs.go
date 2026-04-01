@@ -6,11 +6,13 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
+
+	mongopath "mog/internal/mongo"
+	"mog/internal/mongo/handler/shared"
 
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/mgo.v2/bson"
-
-	"mog/internal/mongo/handler/shared"
 )
 
 // SQL schema and document loading helpers.
@@ -97,8 +99,23 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 		return []pureSQLDoc{}, nil
 	}
 
+	start := time.Now()
+	dbStart := time.Now()
 	rows, err := exec.Query(ctx, query, args...)
+	dbDuration := time.Since(dbStart)
 	if err != nil {
+		mongopath.LogQuery(mongopath.QueryLogOptions{
+			Stage:         "db.query",
+			Operation:     "load_sql_docs",
+			Table:         queryTableFromQuery(query),
+			QueryName:     "load_sql_docs",
+			QueryTemplate: query,
+			ArgsCount:     len(args),
+			StartedAt:     start,
+			DBDuration:    dbDuration,
+			TotalDuration: dbDuration,
+			Error:         err,
+		})
 		if isUndefinedRelation(err) || isUndefinedSchema(err) {
 			return []pureSQLDoc{}, nil
 		}
@@ -109,6 +126,7 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 	fields := rows.FieldDescriptions()
 	numFields := len(fields)
 	out := make([]pureSQLDoc, 0, 16) // Pre-allocate small capacity
+	scanStart := time.Now()
 	for rows.Next() {
 		vals, err := rows.Values()
 		if err != nil {
@@ -201,6 +219,22 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 		normalizeDocForReply(doc)
 		out = append(out, pureSQLDoc{docID: docID, doc: doc})
 	}
+	scanDuration := time.Since(scanStart)
+	totalDuration := time.Since(start)
+	mongopath.LogQuery(mongopath.QueryLogOptions{
+		Stage:         "db.query",
+		Operation:     "load_sql_docs",
+		Table:         queryTableFromQuery(query),
+		QueryName:     "load_sql_docs",
+		QueryTemplate: query,
+		ArgsCount:     len(args),
+		StartedAt:     start,
+		DBDuration:    dbDuration,
+		ScanDuration:  scanDuration,
+		TotalDuration: totalDuration,
+		Rows:          len(out),
+		TxUsage:       "pool",
+	})
 	return out, nil
 }
 
@@ -216,6 +250,18 @@ func (h *Handler) loadSQLDocs(ctx context.Context, physical string) ([]bson.M, e
 		out = append(out, pd.doc)
 	}
 	return out, nil
+}
+
+func queryTableFromQuery(query string) string {
+	lower := strings.ToLower(query)
+	if idx := strings.Index(lower, "from "); idx >= 0 {
+		rest := strings.TrimSpace(query[idx+5:])
+		if idx := strings.IndexAny(rest, " \t;"); idx >= 0 {
+			rest = rest[:idx]
+		}
+		return strings.Trim(rest, "\"")
+	}
+	return ""
 }
 
 func (h *Handler) ensureCollectionTable(ctx context.Context, collection string) error {
