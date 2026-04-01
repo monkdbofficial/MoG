@@ -79,6 +79,13 @@ func (h *Handler) opmsgDeps() opmsg.Deps {
 			}
 			return out, nil
 		},
+		ListCollectionColumns: func(ctx context.Context, physical string) ([]string, error) {
+			exec := DBExecutor(h.pool)
+			if h.tx != nil {
+				exec = h.tx
+			}
+			return h.listColumnsExec(ctx, exec, physical)
+		},
 
 		EnsureCollectionTable: h.ensureCollectionTable,
 		ClearSchemaCache: func(physical string) {

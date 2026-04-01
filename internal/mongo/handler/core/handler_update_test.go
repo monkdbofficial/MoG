@@ -52,9 +52,12 @@ func TestLoadCandidateSQLDocsWithIDs_UsesCoarseWhereClause(t *testing.T) {
 		"age":     bson.M{"$gt": 25},
 		"complex": bson.M{"nested": "x"},
 	}
-	pdocs, err := h.loadCandidateSQLDocsWithIDs(context.Background(), exec, "test__users", filter, false)
+	pdocs, residual, err := h.loadCandidateSQLDocsWithIDs(context.Background(), exec, "test__users", filter, false)
 	if err != nil {
 		t.Fatalf("unexpected err: %v", err)
+	}
+	if _, ok := residual["complex"]; !ok {
+		t.Fatalf("expected residual filter to retain complex predicate, got %#v", residual)
 	}
 	if len(pdocs) != 1 {
 		t.Fatalf("expected one candidate doc, got %d", len(pdocs))
@@ -62,7 +65,7 @@ func TestLoadCandidateSQLDocsWithIDs_UsesCoarseWhereClause(t *testing.T) {
 	if len(exec.querySQL) != 1 {
 		t.Fatalf("expected one query, got %#v", exec.querySQL)
 	}
-	if exec.querySQL[0] != "SELECT * FROM doc.test__users WHERE CAST(age AS DOUBLE PRECISION) > $1" {
+	if exec.querySQL[0] != "SELECT id, complex FROM doc.test__users WHERE CAST(age AS DOUBLE PRECISION) > $1" {
 		t.Fatalf("unexpected query: %q", exec.querySQL[0])
 	}
 	if len(exec.queryArgs[0]) != 1 || exec.queryArgs[0][0] != 25 {

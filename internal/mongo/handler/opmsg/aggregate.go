@@ -97,6 +97,7 @@ func CmdAggregate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) (
 			pushdownArgsCount = len(plan.Args)
 			pushedFilters = plan.PushedDownFilters
 			nonPushedFilters = plan.NonPushedFilters
+			plan.Query = rewriteSelectStarQuery(ctx, deps, physical, plan.Query)
 			pdocs, err := deps.LoadSQLDocsWithIDsQry(ctx, plan.Query, plan.Args...)
 			if err == nil {
 				baseDocs = make([]bson.M, 0, len(pdocs))
@@ -106,15 +107,25 @@ func CmdAggregate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) (
 				}
 				pipelineDocs = plan.RemainingPipeline
 			} else {
-				baseDocs, err = deps.LoadSQLDocs(ctx, physical)
+				pdocs, err := deps.LoadSQLDocsWithIDs(ctx, physical)
 				if err != nil {
 					return nil, true, err
 				}
+				baseDocs = make([]bson.M, 0, len(pdocs))
+				for _, pd := range pdocs {
+					baseDocs = append(baseDocs, pd.Doc)
+					fieldOrderByID[fmt.Sprint(pd.Doc["_id"])] = pd.FieldOrder
+				}
 			}
 		} else {
-			baseDocs, err = deps.LoadSQLDocs(ctx, physical)
+			pdocs, err := deps.LoadSQLDocsWithIDs(ctx, physical)
 			if err != nil {
 				return nil, true, err
+			}
+			baseDocs = make([]bson.M, 0, len(pdocs))
+			for _, pd := range pdocs {
+				baseDocs = append(baseDocs, pd.Doc)
+				fieldOrderByID[fmt.Sprint(pd.Doc["_id"])] = pd.FieldOrder
 			}
 		}
 	}
@@ -650,7 +661,7 @@ func loadGraphLookupDocs(ctx context.Context, deps Deps, physical string, cfg gr
 	if len(hits) == 0 {
 		return []bson.M{}, nil
 	}
-	query, extraArgs := buildLoadDocsByGraphKeySQL(physical, toExpr, len(hits), restrictWhere)
+	query, extraArgs := buildLoadDocsByGraphKeySQL(physical, explicitSelectColumns(ctx, deps, physical), toExpr, len(hits), restrictWhere)
 	args := make([]any, 0, len(hits))
 	for _, hit := range hits {
 		args = append(args, hit.Vertex)
@@ -871,25 +882,83 @@ func graphSQLLiteral(v any) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
-func buildLoadDocsByIDSQL(physical string, n int) string {
+func buildLoadDocsByIDSQL(physical, selectList string, n int) string {
 	placeholders := make([]string, 0, n)
 	for i := 1; i <= n; i++ {
 		placeholders = append(placeholders, fmt.Sprintf("$%d", i))
 	}
-	return fmt.Sprintf("SELECT * FROM doc.%s WHERE id IN (%s)", physical, strings.Join(placeholders, ", "))
+	if strings.TrimSpace(selectList) == "" {
+		selectList = "*"
+	}
+	return fmt.Sprintf("SELECT %s FROM doc.%s WHERE id IN (%s)", selectList, physical, strings.Join(placeholders, ", "))
 }
 
-func buildLoadDocsByGraphKeySQL(physical, toExpr string, n int, restrictWhere *relational.Where) (string, []any) {
+func buildLoadDocsByGraphKeySQL(physical, selectList, toExpr string, n int, restrictWhere *relational.Where) (string, []any) {
 	placeholders := make([]string, 0, n)
 	for i := 1; i <= n; i++ {
 		placeholders = append(placeholders, fmt.Sprintf("$%d", i))
 	}
-	query := fmt.Sprintf("SELECT * FROM doc.%s WHERE CAST(%s AS TEXT) IN (%s)", physical, toExpr, strings.Join(placeholders, ", "))
+	if strings.TrimSpace(selectList) == "" {
+		selectList = "*"
+	}
+	query := fmt.Sprintf("SELECT %s FROM doc.%s WHERE CAST(%s AS TEXT) IN (%s)", selectList, physical, toExpr, strings.Join(placeholders, ", "))
 	if restrictWhere != nil && strings.TrimSpace(restrictWhere.SQL) != "" {
 		query += " AND " + rebindWhereSQL(restrictWhere.SQL, n)
 		return query, restrictWhere.Args
 	}
 	return query, nil
+}
+
+func explicitSelectColumns(ctx context.Context, deps Deps, physical string) string {
+	if deps.ListCollectionColumns == nil {
+		return "*"
+	}
+	cols, err := deps.ListCollectionColumns(ctx, physical)
+	if err != nil || len(cols) == 0 {
+		return "*"
+	}
+	ordered := orderSelectColumns(cols)
+	if len(ordered) == 0 {
+		return "*"
+	}
+	return strings.Join(ordered, ", ")
+}
+
+func orderSelectColumns(cols []string) []string {
+	out := make([]string, 0, len(cols))
+	seen := map[string]struct{}{}
+	appendCol := func(col string) {
+		col = strings.TrimSpace(strings.ToLower(col))
+		if col == "" {
+			return
+		}
+		if _, ok := seen[col]; ok {
+			return
+		}
+		seen[col] = struct{}{}
+		out = append(out, col)
+	}
+	appendCol("id")
+	appendCol("data")
+	for _, col := range cols {
+		if col == "id" || col == "data" {
+			continue
+		}
+		appendCol(col)
+	}
+	return out
+}
+
+func rewriteSelectStarQuery(ctx context.Context, deps Deps, physical, query string) string {
+	prefix := "SELECT * FROM doc." + physical
+	if !strings.HasPrefix(query, prefix) {
+		return query
+	}
+	selectList := explicitSelectColumns(ctx, deps, physical)
+	if selectList == "*" {
+		return query
+	}
+	return "SELECT " + selectList + strings.TrimPrefix(query, "SELECT *")
 }
 
 func graphLookupDocKey(doc bson.M, connectToField string) string {

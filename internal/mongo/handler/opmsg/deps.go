@@ -36,6 +36,7 @@ type Deps struct {
 	LoadSQLDocs           func(ctx context.Context, physical string) ([]bson.M, error)
 	LoadSQLDocsWithIDs    func(ctx context.Context, physical string) ([]SQLDoc, error)
 	LoadSQLDocsWithIDsQry func(ctx context.Context, query string, args ...any) ([]SQLDoc, error)
+	ListCollectionColumns func(ctx context.Context, physical string) ([]string, error)
 
 	EnsureCollectionTable func(ctx context.Context, physical string) error
 	ClearSchemaCache      func(physical string)

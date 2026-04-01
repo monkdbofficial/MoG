@@ -69,7 +69,11 @@ func (h *Handler) loadSQLDocsWithIDs(ctx context.Context, exec DBExecutor, physi
 	if physical == "" {
 		return []pureSQLDoc{}, nil
 	}
-	return h.loadSQLDocsWithIDsQuery(ctx, exec, "SELECT * FROM doc."+physical)
+	selectList, err := h.selectColumnList(ctx, exec, physical)
+	if err != nil {
+		return nil, err
+	}
+	return h.loadSQLDocsWithIDsQuery(ctx, exec, "SELECT "+selectList+" FROM doc."+physical)
 }
 
 func (h *Handler) docExistsByID(ctx context.Context, exec DBExecutor, physical string, docID string) (bool, error) {
@@ -259,7 +263,11 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 func (h *Handler) loadSQLDocs(ctx context.Context, physical string) ([]bson.M, error) {
 	// For performance and safety under high throughput, never load more than 1000 docs
 	// if pushdown failed. In-memory filtering/sorting is extremely slow.
-	pdocs, err := h.loadSQLDocsWithIDsQuery(ctx, h.db(), "SELECT * FROM doc."+physical+" LIMIT 1000")
+	selectList, err := h.selectColumnList(ctx, h.db(), physical)
+	if err != nil {
+		return nil, err
+	}
+	pdocs, err := h.loadSQLDocsWithIDsQuery(ctx, h.db(), "SELECT "+selectList+" FROM doc."+physical+" LIMIT 1000")
 	if err != nil {
 		return nil, err
 	}
@@ -268,6 +276,42 @@ func (h *Handler) loadSQLDocs(ctx context.Context, physical string) ([]bson.M, e
 		out = append(out, pd.doc)
 	}
 	return out, nil
+}
+
+func (h *Handler) selectColumnList(ctx context.Context, exec DBExecutor, physical string) (string, error) {
+	cols, err := h.listColumnsExec(ctx, exec, physical)
+	if err != nil {
+		return "", err
+	}
+	if len(cols) == 0 {
+		return "id", nil
+	}
+	return strings.Join(orderSelectColumns(cols), ", "), nil
+}
+
+func orderSelectColumns(cols []string) []string {
+	out := make([]string, 0, len(cols))
+	seen := map[string]struct{}{}
+	appendCol := func(col string) {
+		col = strings.TrimSpace(strings.ToLower(col))
+		if col == "" {
+			return
+		}
+		if _, ok := seen[col]; ok {
+			return
+		}
+		seen[col] = struct{}{}
+		out = append(out, col)
+	}
+	appendCol("id")
+	appendCol("data")
+	for _, col := range cols {
+		if col == "id" || col == "data" {
+			continue
+		}
+		appendCol(col)
+	}
+	return out
 }
 
 func queryTableFromQuery(query string) string {

@@ -40,7 +40,7 @@ func TestLoadDeleteCandidateDocs_UsesCoarseWhereClause(t *testing.T) {
 	if len(pdocs) != 1 {
 		t.Fatalf("expected one candidate doc, got %d", len(pdocs))
 	}
-	if querySQL != "SELECT * FROM doc.test__users WHERE CAST(age AS DOUBLE PRECISION) > $1" {
+	if querySQL != "SELECT id, complex FROM doc.test__users WHERE CAST(age AS DOUBLE PRECISION) > $1" {
 		t.Fatalf("unexpected query: %q", querySQL)
 	}
 	if len(queryArgs) != 1 || queryArgs[0] != 25 {

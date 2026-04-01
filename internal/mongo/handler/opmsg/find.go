@@ -88,6 +88,7 @@ func CmdFind(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byt
 			if skip > 0 {
 				q = fmt.Sprintf("%s OFFSET %d", q, skip)
 			}
+			q = rewriteSelectStarQuery(ctx, deps, physical, q)
 			pdocs, err := deps.LoadSQLDocsWithIDsQry(ctx, q, args...)
 			if err == nil {
 				docs = make([]bson.M, 0, len(pdocs))
@@ -101,11 +102,15 @@ func CmdFind(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byt
 	}
 
 	if !pushedDown {
-		baseDocs, err := deps.LoadSQLDocs(ctx, physical)
+		pdocs, err := deps.LoadSQLDocsWithIDs(ctx, physical)
 		if err != nil {
 			return nil, true, err
 		}
-		docs = baseDocs
+		docs = make([]bson.M, 0, len(pdocs))
+		for _, pd := range pdocs {
+			docs = append(docs, pd.Doc)
+			fieldOrderByID[fmt.Sprint(pd.Doc["_id"])] = pd.FieldOrder
+		}
 		if len(filter) > 0 {
 			docs = mpipeline.ApplyMatch(docs, filter)
 		}

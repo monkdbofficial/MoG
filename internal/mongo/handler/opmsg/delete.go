@@ -3,6 +3,8 @@ package opmsg
 import (
 	"context"
 	"fmt"
+	"slices"
+	"strings"
 
 	"go.uber.org/zap"
 	"gopkg.in/mgo.v2/bson"
@@ -74,9 +76,10 @@ func CmdDelete(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 		if err != nil {
 			return nil, true, err
 		}
+		residualFilter := deleteResidualFilter(filter)
 		var delIDs []string
 		for _, pd := range pdocs {
-			if mpipeline.MatchDoc(pd.Doc, filter) {
+			if len(residualFilter) == 0 || mpipeline.MatchDoc(pd.Doc, residualFilter) {
 				delIDs = append(delIDs, pd.DocID)
 				if limit == 1 {
 					break
@@ -130,7 +133,7 @@ func loadDeleteCandidateDocs(ctx context.Context, deps Deps, physical string, fi
 		return deps.LoadSQLDocsWithIDs(ctx, physical)
 	}
 
-	query := "SELECT * FROM doc." + physical + " WHERE " + pushdown.Where.SQL
+	query := "SELECT " + deleteCandidateSelectList(ctx, deps, physical, pushdown.ResidualFilter) + " FROM doc." + physical + " WHERE " + pushdown.Where.SQL
 	if single && len(pushdown.ResidualFilter) == 0 {
 		query += " LIMIT 1"
 	}
@@ -140,4 +143,95 @@ func loadDeleteCandidateDocs(ctx context.Context, deps Deps, physical string, fi
 		return pdocs, nil
 	}
 	return deps.LoadSQLDocsWithIDs(ctx, physical)
+}
+
+func deleteCandidateSelectList(ctx context.Context, deps Deps, physical string, residual bson.M) string {
+	needed := map[string]struct{}{"id": {}}
+	for _, field := range deleteFilterFieldRoots(residual) {
+		col := shared.SQLColumnNameForField(field)
+		if col != "" {
+			needed[col] = struct{}{}
+		}
+	}
+	_ = ctx
+	_ = deps
+	_ = physical
+	cols := make([]string, 0, len(needed))
+	for col := range needed {
+		cols = append(cols, col)
+	}
+	slices.Sort(cols)
+	out := orderNeededColumns(cols)
+	if len(out) == 0 {
+		return "id"
+	}
+	return strings.Join(out, ", ")
+}
+
+func deleteFilterFieldRoots(filter bson.M) []string {
+	roots := map[string]struct{}{}
+	var walk func(bson.M)
+	walk = func(m bson.M) {
+		for k, v := range m {
+			if strings.HasPrefix(k, "$") {
+				if sub, ok := shared.CoerceBsonM(v); ok {
+					walk(sub)
+				}
+				continue
+			}
+			root := strings.Split(k, ".")[0]
+			if root != "" && root != "_id" {
+				roots[root] = struct{}{}
+			}
+			if cond, ok := shared.CoerceBsonM(v); ok && mpipeline.DocHasOperatorKeys(cond) {
+				walk(cond)
+			}
+		}
+	}
+	walk(filter)
+	out := make([]string, 0, len(roots))
+	for root := range roots {
+		out = append(out, root)
+	}
+	slices.Sort(out)
+	return out
+}
+
+func deleteResidualFilter(filter bson.M) bson.M {
+	pushdown, err := relational.BuildFilterPushdown(filter)
+	if err != nil {
+		return filter
+	}
+	return pushdown.ResidualFilter
+}
+
+func orderNeededColumns(cols []string) []string {
+	available := map[string]struct{}{}
+	for _, col := range cols {
+		available[col] = struct{}{}
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(cols))
+	appendCol := func(col string) {
+		if col == "" {
+			return
+		}
+		if _, ok := available[col]; !ok {
+			return
+		}
+		if _, ok := seen[col]; ok {
+			return
+		}
+		seen[col] = struct{}{}
+		out = append(out, col)
+	}
+	appendCol("id")
+	appendCol("data")
+	for _, col := range cols {
+		if col == "id" || col == "data" {
+			continue
+		}
+		appendCol(col)
+	}
+	return out
 }
