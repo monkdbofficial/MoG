@@ -21,10 +21,17 @@ func applyGraphLookup(docs []bson.M, spec bson.M, resolve lookupResolver) ([]bso
 		return nil, fmt.Errorf("$graphLookup requires startWith")
 	}
 
-	maxDepth := 0
+	maxDepth := -1
 	if v, ok := spec["maxDepth"]; ok && v != nil {
 		if n, err := asInt(v); err == nil && n >= 0 {
 			maxDepth = n
+		}
+	}
+	depthField, _ := spec["depthField"].(string)
+	restrict := bson.M{}
+	if rawRestrict, ok := spec["restrictSearchWithMatch"]; ok && rawRestrict != nil {
+		if m, ok := coerceBsonM(rawRestrict); ok {
+			restrict = m
 		}
 	}
 
@@ -70,7 +77,7 @@ func applyGraphLookup(docs []bson.M, spec bson.M, resolve lookupResolver) ([]bso
 		for len(q) > 0 {
 			cur := q[0]
 			q = q[1:]
-			if cur.depth > maxDepth {
+			if maxDepth >= 0 && cur.depth > maxDepth {
 				continue
 			}
 
@@ -80,7 +87,14 @@ func applyGraphLookup(docs []bson.M, spec bson.M, resolve lookupResolver) ([]bso
 				if fmt.Sprint(toVal) != fmt.Sprint(cur.val) {
 					continue
 				}
-				results = append(results, fd)
+				if len(restrict) > 0 && !matchDoc(fd, restrict) {
+					continue
+				}
+				clone := deepCloneDoc(fd)
+				if depthField != "" {
+					clone[depthField] = int64(cur.depth)
+				}
+				results = append(results, clone)
 
 				// Expand using connectFromField.
 				next := getPathValue(fd, connectFromField)

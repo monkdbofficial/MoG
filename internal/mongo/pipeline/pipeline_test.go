@@ -202,6 +202,19 @@ func TestApplyPipeline_CountStage(t *testing.T) {
 	}
 }
 
+func TestApplyPipeline_VectorSearchRequiresSQLPushdown(t *testing.T) {
+	_, err := ApplyPipeline([]bson.M{{"_id": 1, "embedding": []float64{0.1, 0.2}}}, []bson.M{{
+		"$vectorSearch": bson.M{
+			"path":        "embedding",
+			"queryVector": []float64{0.1, 0.2},
+			"limit":       1,
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "requires SQL pushdown") {
+		t.Fatalf("expected SQL pushdown error, got %v", err)
+	}
+}
+
 func TestApplyPipeline_Lookup_NestedAndMissing(t *testing.T) {
 	base := []bson.M{
 		{"_id": 1, "address": bson.M{"city": "NY"}},
@@ -818,6 +831,129 @@ func TestApplyPipeline_GraphLookup_ManagerChain(t *testing.T) {
 	}
 	if !seen[3] || !seen[2] || !seen[1] {
 		t.Fatalf("expected hierarchy to include user_id 3->2->1, got %#v", h)
+	}
+}
+
+func TestApplyPipeline_GraphLookup_DepthAndRestrict(t *testing.T) {
+	base := []bson.M{
+		{"_id": 10, "manager_id": 3},
+	}
+	foreign := []bson.M{
+		{"user_id": 1, "manager_id": nil, "active": false},
+		{"user_id": 2, "manager_id": 1, "active": false},
+		{"user_id": 3, "manager_id": 2, "active": true},
+	}
+	resolver := func(from string) ([]bson.M, error) {
+		return foreign, nil
+	}
+
+	out, err := ApplyPipelineWithLookup(base, []bson.M{{
+		"$graphLookup": bson.M{
+			"from":                    "users",
+			"startWith":               "$manager_id",
+			"connectFromField":        "manager_id",
+			"connectToField":          "user_id",
+			"restrictSearchWithMatch": bson.M{"active": true},
+			"depthField":              "depth",
+			"maxDepth":                3,
+			"as":                      "hierarchy",
+		},
+	}}, resolver)
+	if err != nil {
+		t.Fatalf("ApplyPipelineWithLookup err: %v", err)
+	}
+	h, ok := out[0]["hierarchy"].([]bson.M)
+	if !ok || len(h) != 1 {
+		t.Fatalf("unexpected hierarchy: %#v", out[0]["hierarchy"])
+	}
+	if h[0]["user_id"] != 3 || h[0]["depth"] != int64(0) {
+		t.Fatalf("unexpected result: %#v", h[0])
+	}
+}
+
+func TestApplyPipeline_GraphLookup_MongoStyleManagementChain(t *testing.T) {
+	base := []bson.M{
+		{"user_id": 3, "name": "Cara", "manager_id": 2},
+	}
+	foreign := []bson.M{
+		{"user_id": 1, "name": "Alice", "manager_id": nil, "active": true},
+		{"user_id": 2, "name": "Bob", "manager_id": 1, "active": true},
+		{"user_id": 3, "name": "Cara", "manager_id": 2, "active": true},
+		{"user_id": 4, "name": "Dan", "manager_id": 2, "active": false},
+	}
+	resolver := func(from string) ([]bson.M, error) {
+		return foreign, nil
+	}
+
+	out, err := ApplyPipelineWithLookup(base, []bson.M{{
+		"$graphLookup": bson.M{
+			"from":                    "users",
+			"startWith":               "$manager_id",
+			"connectFromField":        "manager_id",
+			"connectToField":          "user_id",
+			"restrictSearchWithMatch": bson.M{"active": true},
+			"depthField":              "depth",
+			"maxDepth":                3,
+			"as":                      "management_chain",
+		},
+	}}, resolver)
+	if err != nil {
+		t.Fatalf("ApplyPipelineWithLookup err: %v", err)
+	}
+	if out[0]["user_id"] != 3 || out[0]["name"] != "Cara" {
+		t.Fatalf("unexpected root doc: %#v", out[0])
+	}
+	chain, ok := out[0]["management_chain"].([]bson.M)
+	if !ok || len(chain) != 2 {
+		t.Fatalf("unexpected management_chain: %#v", out[0]["management_chain"])
+	}
+	if chain[0]["user_id"] != 2 || chain[0]["name"] != "Bob" || chain[0]["depth"] != int64(0) {
+		t.Fatalf("unexpected first chain hop: %#v", chain[0])
+	}
+	if chain[1]["user_id"] != 1 || chain[1]["name"] != "Alice" || chain[1]["depth"] != int64(1) {
+		t.Fatalf("unexpected second chain hop: %#v", chain[1])
+	}
+}
+
+func TestApplyPipeline_Project_DottedArrayFields(t *testing.T) {
+	docs := []bson.M{
+		{
+			"user_id": 3,
+			"name":    "Cara",
+			"management_chain": []bson.M{
+				{"user_id": 2, "name": "Bob", "depth": int64(0), "active": true},
+				{"user_id": 1, "name": "Alice", "depth": int64(1), "active": true},
+			},
+		},
+	}
+
+	out, err := ApplyPipeline(docs, []bson.M{{
+		"$project": bson.M{
+			"_id":                      0,
+			"user_id":                  1,
+			"name":                     1,
+			"management_chain.user_id": 1,
+			"management_chain.name":    1,
+			"management_chain.depth":   1,
+		},
+	}})
+	if err != nil {
+		t.Fatalf("ApplyPipeline err: %v", err)
+	}
+	if out[0]["user_id"] != 3 || out[0]["name"] != "Cara" {
+		t.Fatalf("unexpected root projection: %#v", out[0])
+	}
+	chain, ok := out[0]["management_chain"].([]interface{})
+	if !ok || len(chain) != 2 {
+		t.Fatalf("unexpected projected chain: %#v", out[0]["management_chain"])
+	}
+	first, _ := chain[0].(bson.M)
+	second, _ := chain[1].(bson.M)
+	if len(first) != 3 || first["user_id"] != 2 || first["name"] != "Bob" || first["depth"] != int64(0) {
+		t.Fatalf("unexpected first projected element: %#v", first)
+	}
+	if len(second) != 3 || second["user_id"] != 1 || second["name"] != "Alice" || second["depth"] != int64(1) {
+		t.Fatalf("unexpected second projected element: %#v", second)
 	}
 }
 

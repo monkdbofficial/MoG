@@ -8,6 +8,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 
 	"mog/internal/logging"
+	"mog/internal/mongo/handler/relational"
 	"mog/internal/mongo/handler/shared"
 	mpipeline "mog/internal/mongo/pipeline"
 )
@@ -69,7 +70,7 @@ func CmdDelete(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 			}
 		}
 
-		pdocs, err := deps.LoadSQLDocsWithIDs(ctx, physical)
+		pdocs, err := loadDeleteCandidateDocs(ctx, deps, physical, filter, limit == 1)
 		if err != nil {
 			return nil, true, err
 		}
@@ -118,4 +119,25 @@ func CmdDelete(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 
 	resp, err := deps.NewMsg(requestID, respDoc)
 	return resp, true, err
+}
+
+func loadDeleteCandidateDocs(ctx context.Context, deps Deps, physical string, filter bson.M, single bool) ([]SQLDoc, error) {
+	pushdown, err := relational.BuildFilterPushdown(filter)
+	if err != nil {
+		return nil, err
+	}
+	if len(pushdown.PushedFilter) == 0 || pushdown.Where == nil || pushdown.Where.SQL == "" {
+		return deps.LoadSQLDocsWithIDs(ctx, physical)
+	}
+
+	query := "SELECT * FROM doc." + physical + " WHERE " + pushdown.Where.SQL
+	if single && len(pushdown.ResidualFilter) == 0 {
+		query += " LIMIT 1"
+	}
+
+	pdocs, err := deps.LoadSQLDocsWithIDsQry(ctx, query, pushdown.Where.Args...)
+	if err == nil {
+		return pdocs, nil
+	}
+	return deps.LoadSQLDocsWithIDs(ctx, physical)
 }

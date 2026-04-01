@@ -41,20 +41,30 @@ var (
 )
 
 type QueryLogOptions struct {
-	Stage         string
-	Operation     string
-	Table         string
-	QueryName     string
-	QueryTemplate string
-	ArgsCount     int
-	StartedAt     time.Time
-	DBDuration    time.Duration
-	ScanDuration  time.Duration
-	TotalDuration time.Duration
-	Rows          int
-	RowsAffected  int64
-	TxUsage       string
-	Error         error
+	Stage                  string
+	Method                 string
+	Operation              string
+	Table                  string
+	QueryName              string
+	QueryTemplate          string
+	ArgsCount              int
+	StartedAt              time.Time
+	DBDuration             time.Duration
+	ScanDuration           time.Duration
+	PostProcessingDuration time.Duration
+	PushdownDuration       time.Duration
+	TotalDuration          time.Duration
+	Rows                   int
+	RowsAffected           int64
+	TxUsage                string
+	Error                  error
+	PushdownReason         string
+	PushedDownFilters      []string
+	NonPushedFilters       []string
+	SortFields             []string
+	Limit                  int
+	Skip                   int
+	QueryHash              uint64
 }
 
 func loadThresholds() {
@@ -127,56 +137,81 @@ func AdapterError(stage string, err error, fields ...zap.Field) {
 }
 
 func LogQuery(opts QueryLogOptions) {
+	if !AdapterDebugEnabled() {
+		return
+	}
 	if opts.Stage == "" {
 		opts.Stage = DBStageName
+	}
+	if opts.Method == "" {
+		opts.Method = opts.Operation
 	}
 	if opts.Table == "" {
 		opts.Table = defaultQueryName
 	}
 	totalDuration := opts.TotalDuration
 	if totalDuration <= 0 {
-		totalDuration = opts.DBDuration + opts.ScanDuration
+		totalDuration = opts.PushdownDuration + opts.DBDuration + opts.ScanDuration + opts.PostProcessingDuration
 	}
-	if totalDuration <= 0 {
+	if totalDuration <= 0 && !opts.StartedAt.IsZero() {
 		totalDuration = time.Since(opts.StartedAt)
 	}
 	loadThresholds()
-	dbDurationMs := float64(opts.DBDuration.Milliseconds())
-	scanDurationMs := float64(opts.ScanDuration.Milliseconds())
-	totalDurationMs := float64(totalDuration.Milliseconds())
-	slowQuery := thresholds.query > 0 && int64(thresholds.query) <= int64(opts.DBDuration.Milliseconds())
-	slowScan := thresholds.scan > 0 && int64(thresholds.scan) <= int64(opts.ScanDuration.Milliseconds())
-	slowAdapter := thresholds.adapter > 0 && int64(thresholds.adapter) <= int64(totalDuration.Milliseconds())
+	dbDurationMs := durationMillis(opts.DBDuration)
+	scanDurationMs := durationMillis(opts.ScanDuration)
+	postProcessingMs := durationMillis(opts.PostProcessingDuration)
+	pushdownMs := durationMillis(opts.PushdownDuration)
+	totalDurationMs := durationMillis(totalDuration)
+	slowQuery := thresholds.query > 0 && opts.DBDuration.Milliseconds() >= int64(thresholds.query)
+	slowScan := thresholds.scan > 0 && opts.ScanDuration.Milliseconds() >= int64(thresholds.scan)
+	slowAdapter := thresholds.adapter > 0 && totalDuration.Milliseconds() >= int64(thresholds.adapter)
+
+	if opts.QueryHash == 0 {
+		opts.QueryHash = QueryHash(opts.QueryTemplate)
+	}
 
 	fields := []zap.Field{
+		zap.String("method", opts.Method),
 		zap.String("operation", opts.Operation),
-		zap.String("table", opts.Table),
 		zap.String("query_name", opts.QueryName),
+		zap.String("table", opts.Table),
 		zap.Int("args_count", opts.ArgsCount),
-		zap.Uint64("query_hash", QueryHash(opts.QueryTemplate)),
+		zap.Uint64("query_hash", opts.QueryHash),
+		zap.Int("limit", opts.Limit),
+		zap.Int("skip", opts.Skip),
+		zap.String("pushdown_reason", opts.PushdownReason),
+		zap.Strings("pushed_down_filters", opts.PushedDownFilters),
+		zap.Strings("non_pushed_filters", opts.NonPushedFilters),
+		zap.Strings("sort_fields", opts.SortFields),
+		zap.Float64("pushdown_duration_ms", pushdownMs),
+		zap.Float64("db_duration_ms", dbDurationMs),
+		zap.Float64("scan_duration_ms", scanDurationMs),
+		zap.Float64("post_processing_duration_ms", postProcessingMs),
+		zap.Float64("total_duration_ms", totalDurationMs),
 		zap.Int("rows", opts.Rows),
 		zap.Int64("rows_affected", opts.RowsAffected),
 		zap.String("tx_usage", opts.TxUsage),
-		zap.Float64("db_duration_ms", dbDurationMs),
-		zap.Float64("scan_duration_ms", scanDurationMs),
-		zap.Float64("total_duration_ms", totalDurationMs),
 		zap.Bool("slow_query", slowQuery),
 		zap.Bool("slow_scan", slowScan),
 		zap.Bool("slow_adapter_call", slowAdapter),
 	}
+	opts.FieldsCleanup()
+	AdapterDebug(opts.Stage, append(fields, zap.String("sql", opts.QueryTemplate))...)
+}
 
-	if AdapterDebugEnabled() {
-		AdapterDebug(opts.Stage, append(fields, zap.String("sql", opts.QueryTemplate))...)
-		return
+func durationMillis(d time.Duration) float64 {
+	return float64(d.Milliseconds())
+}
+
+func (opts *QueryLogOptions) FieldsCleanup() {
+	if len(opts.SortFields) == 0 {
+		opts.SortFields = nil
 	}
-
-	if opts.Error != nil {
-		AdapterError(opts.Stage, opts.Error, append(fields, zap.String("sql", opts.QueryTemplate))...)
-		return
+	if len(opts.PushedDownFilters) == 0 {
+		opts.PushedDownFilters = nil
 	}
-
-	if slowQuery || slowScan || slowAdapter {
-		AdapterWarn(opts.Stage, append(fields, zap.String("sql", opts.QueryTemplate))...)
+	if len(opts.NonPushedFilters) == 0 {
+		opts.NonPushedFilters = nil
 	}
 }
 

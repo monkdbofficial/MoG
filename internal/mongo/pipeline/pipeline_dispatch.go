@@ -30,15 +30,7 @@ func applyPipelineWithLookup(docs []bson.M, pipeline []bson.M, resolve lookupRes
 	for _, stage := range pipeline {
 		switch {
 		case stage["$vectorSearch"] != nil:
-			spec, ok := coerceBsonM(stage["$vectorSearch"])
-			if !ok {
-				return nil, fmt.Errorf("$vectorSearch stage must be a document")
-			}
-			var err error
-			out, err = applyVectorSearch(out, spec)
-			if err != nil {
-				return nil, err
-			}
+			return nil, fmt.Errorf("$vectorSearch requires SQL pushdown in MoG")
 		case stage["$match"] != nil:
 			m, ok := stage["$match"].(bson.M)
 			if !ok {

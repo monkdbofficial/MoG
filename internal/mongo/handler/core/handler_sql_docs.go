@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
 	"time"
 
@@ -269,6 +270,47 @@ func (h *Handler) ensureCollectionTable(ctx context.Context, collection string) 
 		return fmt.Errorf("database pool is not configured")
 	}
 	return h.ensureCollectionTableExec(ctx, h.pool, collection)
+}
+
+func (h *Handler) ensureCollectionTableWithColumnsExec(ctx context.Context, exec DBExecutor, collection string, colTypes map[string]string) error {
+	if exec == nil {
+		return fmt.Errorf("db executor is nil")
+	}
+	if collection == "" {
+		return fmt.Errorf("empty collection")
+	}
+	if h.schemaCache().isInitialized(collection) {
+		return h.ensureCollectionTableExec(ctx, exec, collection)
+	}
+	if !shared.IsSafeIdentifier(collection) {
+		return fmt.Errorf("invalid collection name: %s", collection)
+	}
+	_ = h.ensureDocSchemaExec(ctx, exec)
+
+	defs := []string{"id TEXT PRIMARY KEY"}
+	if h.storeRawMongoJSON {
+		defs = append(defs, "data OBJECT(DYNAMIC)")
+	}
+	cols := make([]string, 0, len(colTypes))
+	for col := range colTypes {
+		if col == "" || col == "id" || col == "data" {
+			continue
+		}
+		cols = append(cols, col)
+	}
+	sort.Strings(cols)
+	for _, col := range cols {
+		sqlType := strings.TrimSpace(colTypes[col])
+		if sqlType == "" {
+			continue
+		}
+		defs = append(defs, fmt.Sprintf("%s %s", col, sqlType))
+	}
+
+	if _, err := exec.Exec(ctx, "CREATE TABLE IF NOT EXISTS doc."+collection+" ("+strings.Join(defs, ", ")+")"); err != nil {
+		return err
+	}
+	return h.ensureCollectionTableExec(ctx, exec, collection)
 }
 
 func (h *Handler) ensureCollectionTableExec(ctx context.Context, exec DBExecutor, collection string) error {

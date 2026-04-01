@@ -3,8 +3,10 @@ package relational
 import (
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"sort"
 	"strings"
+	"time"
 
 	"gopkg.in/mgo.v2/bson"
 
@@ -14,6 +16,12 @@ import (
 type Where struct {
 	SQL  string
 	Args []interface{}
+}
+
+type FilterPushdown struct {
+	Where          *Where
+	PushedFilter   bson.M
+	ResidualFilter bson.M
 }
 
 func normalizeIDForStorage(v interface{}) interface{} {
@@ -155,6 +163,49 @@ func BuildWhere(filter bson.M) (*Where, bool, error) {
 	return &Where{SQL: strings.Join(parts, " AND "), Args: args}, true, nil
 }
 
+func BuildFilterPushdown(filter bson.M) (FilterPushdown, error) {
+	pushdown := FilterPushdown{
+		Where:          &Where{SQL: "", Args: nil},
+		PushedFilter:   bson.M{},
+		ResidualFilter: bson.M{},
+	}
+	if len(filter) == 0 {
+		return pushdown, nil
+	}
+
+	keys := make([]string, 0, len(filter))
+	for k := range filter {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	for _, field := range keys {
+		val := filter[field]
+		if isSafePushdownCondition(field, val) {
+			pushdown.PushedFilter[field] = val
+			continue
+		}
+		pushdown.ResidualFilter[field] = val
+	}
+
+	if len(pushdown.PushedFilter) == 0 {
+		return pushdown, nil
+	}
+
+	where, ok, err := BuildWhere(pushdown.PushedFilter)
+	if err != nil {
+		return FilterPushdown{}, err
+	}
+	if !ok || where == nil {
+		pushdown.ResidualFilter = mergeFilters(pushdown.PushedFilter, pushdown.ResidualFilter)
+		pushdown.PushedFilter = bson.M{}
+		pushdown.Where = &Where{SQL: "", Args: nil}
+		return pushdown, nil
+	}
+	pushdown.Where = where
+	return pushdown, nil
+}
+
 func BuildOrderBy(sortSpec bson.M) (string, bool, error) {
 	if len(sortSpec) == 0 {
 		return "", true, nil
@@ -233,4 +284,74 @@ func relationalAccessor(path string) (string, bool) {
 		acc += fmt.Sprintf("['%s']", p)
 	}
 	return acc, true
+}
+
+func isSafePushdownCondition(field string, val interface{}) bool {
+	if field == "" || strings.HasPrefix(field, "$") {
+		return false
+	}
+	if _, ok := relationalAccessor(field); !ok {
+		return false
+	}
+
+	cond, ok := shared.CoerceBsonM(val)
+	if !ok || !shared.DocHasOperatorKeys(cond) {
+		return isSafePushdownValue(val)
+	}
+
+	if len(cond) == 0 {
+		return false
+	}
+	for op, opVal := range cond {
+		switch op {
+		case "$gt", "$gte", "$lt", "$lte", "$ne":
+			if !isSafePushdownValue(opVal) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+func isSafePushdownValue(v interface{}) bool {
+	if v == nil {
+		return false
+	}
+	switch v.(type) {
+	case string, bool,
+		int, int8, int16, int32, int64,
+		uint, uint8, uint16, uint32, uint64,
+		float32, float64,
+		bson.ObjectId,
+		time.Time:
+		return true
+	}
+	if _, ok := shared.CoerceBsonM(v); ok {
+		return false
+	}
+	if _, ok := shared.CoerceInterfaceSlice(v); ok {
+		return false
+	}
+	rv := reflect.ValueOf(v)
+	if !rv.IsValid() {
+		return false
+	}
+	switch rv.Kind() {
+	case reflect.Map, reflect.Struct, reflect.Slice, reflect.Array:
+		return false
+	default:
+		return true
+	}
+}
+
+func mergeFilters(filters ...bson.M) bson.M {
+	out := bson.M{}
+	for _, filter := range filters {
+		for k, v := range filter {
+			out[k] = v
+		}
+	}
+	return out
 }

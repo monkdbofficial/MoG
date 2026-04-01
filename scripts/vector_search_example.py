@@ -1,56 +1,79 @@
-
 from pymongo import MongoClient
+from pymongo.errors import PyMongoError
 
-# --- Connection ---
-# Connect to the MoG instance, which is listening on the default MongoDB port.
-client = MongoClient('mongodb://user:password@localhost:27018/admin')
-db = client['testdb']
-collection = db['articles']
 
-# --- Data Setup ---
-# Clear existing data and insert some sample documents with vector embeddings.
-collection.delete_many({})
-collection.insert_many([
-    {
-        "_id": 1,
-        "title": "An article about cats",
-        "embedding": [0.1, 0.8, 0.2]
-    },
-    {
-        "_id": 2,
-        "title": "An article about dogs",
-        "embedding": [0.7, 0.2, 0.1]
-    },
-    {
-        "_id": 3,
-        "title": "Another article about cats",
-        "embedding": [0.2, 0.7, 0.3]
-    }
-])
+# MONGO_URI = "mongodb://user:password@localhost:27018/admin"
+MONGO_URI = "mongodb://localhost:27017/admin"
+DB_NAME = "testdb"
+COLLECTION_NAME = "articles"
+# The `MONGO_URI` variable is storing the connection string for connecting to a MongoDB database. In
+# this case, the URI is `"mongodb://user:password@localhost:27018/admin"`.
 
-print("--- Initial Data in Collection ---")
-for doc in collection.find():
-    print(doc)
 
-# --- Vector Search ---
-# Define the vector to search for and the aggregation pipeline.
-query_vector = [0.15, 0.75, 0.25]
-pipeline = [
-    {
-        "$vectorSearch": {
-            "path": "embedding",
-            "queryVector": query_vector,
-            "limit": 2
-        }
-    }
-]
+def main() -> None:
+    client = MongoClient(MONGO_URI, serverSelectionTimeoutMS=5000)
+    try:
+        client.admin.command("ping")
+        collection = client[DB_NAME][COLLECTION_NAME]
 
-print(f"\n--- Performing vector search with query: {query_vector} ---")
-results = list(collection.aggregate(pipeline))
+        collection.drop()
+        collection.insert_many(
+            [
+                {
+                    "_id": "doc_1",
+                    "title": "MonkDB is great for time-series and vector workloads.",
+                    "embedding": [0.91, 0.07, 0.01, 0.22],
+                },
+                {
+                    "_id": "doc_2",
+                    "title": "Vector search in databases is important for AI applications.",
+                    "embedding": [0.11, 0.80, 0.05, 0.33],
+                },
+                {
+                    "_id": "doc_3",
+                    "title": "MonkDB provides scalable distributed storage.",
+                    "embedding": [0.84, 0.10, 0.02, 0.18],
+                },
+            ],
+            ordered=True,
+        )
 
-# --- Results ---
-print("\n--- Vector Search Results ---")
-for doc in results:
-    print(f"Score: {doc.get('__mog_vectorSearchScore', 'N/A')}, Document: {doc}")
+        print("--- Seeded Documents ---")
+        for doc in collection.find({}, {"_id": 1, "title": 1, "embedding": 1}):
+            print(doc)
 
-client.close()
+        pipeline = [
+            {
+                "$vectorSearch": {
+                    "path": "embedding",
+                    "queryVector": [0.10, 0.79, 0.06, 0.30],
+                    "limit": 2,
+                }
+            },
+            {
+                "$project": {
+                    "_id": 1,
+                    "title": 1,
+                    "score": {"$meta": "vectorSearchScore"},
+                }
+            },
+        ]
+
+        print("\n--- Running Vector Search ---")
+        print(pipeline)
+        results = list(collection.aggregate(pipeline, maxTimeMS=10000))
+
+        print("\n--- Vector Search Results ---")
+        for doc in results:
+            print(doc)
+        if not results:
+            print("No results returned.")
+
+    except PyMongoError as err:
+        print(f"Vector search failed: {err}")
+    finally:
+        client.close()
+
+
+if __name__ == "__main__":
+    main()

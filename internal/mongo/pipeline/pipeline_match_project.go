@@ -228,8 +228,14 @@ func applyProject(docs []bson.M, proj bson.M) ([]bson.M, error) {
 	for _, d := range docs {
 		nd := bson.M{}
 		for k := range include {
+			if strings.Contains(k, ".") {
+				if projected, ok := projectIncludeValue(d, strings.Split(k, ".")); ok {
+					mergeProjectedDoc(nd, projected)
+				}
+				continue
+			}
 			if v, ok := d[k]; ok {
-				nd[k] = v
+				nd[k] = deepClone(v)
 			}
 		}
 		for k, expr := range computed {
@@ -242,6 +248,85 @@ func applyProject(docs []bson.M, proj bson.M) ([]bson.M, error) {
 		out = append(out, nd)
 	}
 	return out, nil
+}
+
+func projectIncludeValue(root interface{}, parts []string) (interface{}, bool) {
+	if len(parts) == 0 {
+		return deepClone(root), true
+	}
+	if arr, ok := coerceInterfaceSlice(root); ok {
+		out := make([]interface{}, 0, len(arr))
+		for _, item := range arr {
+			projected, ok := projectIncludeValue(item, parts)
+			if ok {
+				out = append(out, projected)
+			}
+		}
+		return out, true
+	}
+	doc, ok := coerceBsonM(root)
+	if !ok {
+		return nil, false
+	}
+	next, ok := doc[parts[0]]
+	if !ok {
+		return nil, false
+	}
+	if len(parts) == 1 {
+		return bson.M{parts[0]: deepClone(next)}, true
+	}
+	projected, ok := projectIncludeValue(next, parts[1:])
+	if !ok {
+		return nil, false
+	}
+	return bson.M{parts[0]: projected}, true
+}
+
+func mergeProjectedDoc(dst bson.M, projected interface{}) {
+	doc, ok := coerceBsonM(projected)
+	if !ok {
+		return
+	}
+	for k, v := range doc {
+		if existing, exists := dst[k]; exists {
+			dst[k] = mergeProjectedValue(existing, v)
+			continue
+		}
+		dst[k] = deepClone(v)
+	}
+}
+
+func mergeProjectedValue(existing, projected interface{}) interface{} {
+	existingDoc, existingIsDoc := coerceBsonM(existing)
+	projectedDoc, projectedIsDoc := coerceBsonM(projected)
+	if existingIsDoc && projectedIsDoc {
+		out := deepCloneDoc(existingDoc)
+		for k, v := range projectedDoc {
+			if cur, ok := out[k]; ok {
+				out[k] = mergeProjectedValue(cur, v)
+				continue
+			}
+			out[k] = deepClone(v)
+		}
+		return out
+	}
+	existingArr, existingIsArr := coerceInterfaceSlice(existing)
+	projectedArr, projectedIsArr := coerceInterfaceSlice(projected)
+	if existingIsArr && projectedIsArr {
+		out := make([]interface{}, 0, max(len(existingArr), len(projectedArr)))
+		for idx := 0; idx < len(existingArr) || idx < len(projectedArr); idx++ {
+			switch {
+			case idx < len(existingArr) && idx < len(projectedArr):
+				out = append(out, mergeProjectedValue(existingArr[idx], projectedArr[idx]))
+			case idx < len(existingArr):
+				out = append(out, deepClone(existingArr[idx]))
+			default:
+				out = append(out, deepClone(projectedArr[idx]))
+			}
+		}
+		return out
+	}
+	return deepClone(projected)
 }
 
 func applyAddFields(docs []bson.M, spec bson.M) ([]bson.M, error) {

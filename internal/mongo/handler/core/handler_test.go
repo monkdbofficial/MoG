@@ -243,3 +243,35 @@ func TestEnsureCollectionTableExec_UpgradesDataColumnWhenCacheInitialized(t *tes
 		t.Fatalf("expected schema cache to include data column")
 	}
 }
+
+func TestEnsureCollectionTableWithColumnsExec_CreatesVectorColumnInline(t *testing.T) {
+	scram, _ := NewScramSha256("u", "p")
+	h := NewHandler(nil, translator.New(), scram)
+	h.storeRawMongoJSON = true
+
+	physical := "test_vector_inline"
+	defer h.schemaCache().clear(physical)
+
+	exec := &recordingExec{}
+	err := h.ensureCollectionTableWithColumnsExec(context.Background(), exec, physical, map[string]string{
+		"title":     "TEXT",
+		"embedding": "FLOAT_VECTOR(4)",
+	})
+	if err != nil {
+		t.Fatalf("ensureCollectionTableWithColumnsExec: %v", err)
+	}
+	if len(exec.execs) == 0 {
+		t.Fatalf("expected exec calls")
+	}
+	want := "CREATE TABLE IF NOT EXISTS doc." + physical + " (id TEXT PRIMARY KEY, data OBJECT(DYNAMIC), embedding FLOAT_VECTOR(4), title TEXT)"
+	found := false
+	for _, sql := range exec.execs {
+		if sql == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected create statement %q in %#v", want, exec.execs)
+	}
+}

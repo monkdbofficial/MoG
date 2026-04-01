@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/mgo.v2/bson"
 
+	"mog/internal/mongo/handler/relational"
 	"mog/internal/mongo/handler/shared"
 	mpipeline "mog/internal/mongo/pipeline"
 	mupdate "mog/internal/mongo/update"
@@ -229,8 +230,8 @@ func (h *Handler) applyPureSQLUpdate(ctx context.Context, exec DBExecutor, physi
 		}
 	}
 
-	// Load all docs and apply the match/update in-memory for maximum Mongo compatibility.
-	pdocs, err := h.loadSQLDocsWithIDs(ctx, exec, physical)
+	// Use SQL as a coarse pre-filter when we can, then preserve Mongo semantics in-memory.
+	pdocs, err := h.loadCandidateSQLDocsWithIDs(ctx, exec, physical, filter, !multi)
 	if err != nil {
 		return 0, 0, nil, err
 	}
@@ -292,6 +293,27 @@ func (h *Handler) applyPureSQLUpdate(ctx context.Context, exec DBExecutor, physi
 	}
 
 	return matched, modified, nil, nil
+}
+
+func (h *Handler) loadCandidateSQLDocsWithIDs(ctx context.Context, exec DBExecutor, physical string, filter bson.M, single bool) ([]pureSQLDoc, error) {
+	pushdown, err := relational.BuildFilterPushdown(filter)
+	if err != nil {
+		return nil, err
+	}
+	if len(pushdown.PushedFilter) == 0 || pushdown.Where == nil || strings.TrimSpace(pushdown.Where.SQL) == "" {
+		return h.loadSQLDocsWithIDs(ctx, exec, physical)
+	}
+
+	query := "SELECT * FROM doc." + physical + " WHERE " + pushdown.Where.SQL
+	if single && len(pushdown.ResidualFilter) == 0 {
+		query += " LIMIT 1"
+	}
+
+	pdocs, err := h.loadSQLDocsWithIDsQuery(ctx, exec, query, pushdown.Where.Args...)
+	if err == nil {
+		return pdocs, nil
+	}
+	return h.loadSQLDocsWithIDs(ctx, exec, physical)
 }
 
 func isReplacementUpdateDoc(update bson.M) bool {
