@@ -35,20 +35,19 @@ type Handler struct {
 
 	storeRawMongoJSON bool
 	logWriteInfo      bool
-	stableFieldOrder  bool
 
-	blobTable      string
-	blobHTTPBase   string
-	blobShards     int
-	blobMinBytes   int
-	blobMetaEnable bool
-	blobMetaTable  string
-	blobInlineReads   bool
+	blobTable          string
+	blobHTTPBase       string
+	blobShards         int
+	blobMinBytes       int
+	blobMetaEnable     bool
+	blobMetaTable      string
+	blobInlineReads    bool
 	blobInlineMaxBytes int
-	blobInlineStrict  bool
-	blobHTTPTransport http.RoundTripper
-	blobOnce       sync.Once
-	blobInitErr    error
+	blobInlineStrict   bool
+	blobHTTPTransport  http.RoundTripper
+	blobOnce           sync.Once
+	blobInitErr        error
 
 	// scram conversation
 	scram         *ScramSha256
@@ -64,15 +63,14 @@ func NewHandler(pool *pgxpool.Pool, t *translator.Translator, scram *ScramSha256
 		scram:             scram,
 		touched:           map[string]struct{}{},
 		storeRawMongoJSON: envBool("MOG_STORE_RAW_MONGO_JSON", false),
-		stableFieldOrder:  envBool("MOG_STABLE_FIELD_ORDER", false),
 		// Minimal info-level write logging is opt-in to avoid performance overhead under high QPS.
-		logWriteInfo: envBool("MOG_INFO_LOG_WRITES", false),
-		blobTable:    strings.TrimSpace(os.Getenv("MOG_BLOB_TABLE")),
-		blobHTTPBase: strings.TrimSpace(envString("MOG_BLOB_HTTP_BASE", "http://localhost:6000")),
-		blobShards:   envInt("MOG_BLOB_SHARDS", 3),
-		blobMinBytes: envInt("MOG_BLOB_MIN_BYTES", 256),
-		blobMetaEnable: envBool("MOG_BLOB_METADATA", false),
-		blobMetaTable:  strings.TrimSpace(envString("MOG_BLOB_METADATA_TABLE", "doc.blob_metadata")),
+		logWriteInfo:       envBool("MOG_INFO_LOG_WRITES", false),
+		blobTable:          strings.TrimSpace(os.Getenv("MOG_BLOB_TABLE")),
+		blobHTTPBase:       strings.TrimSpace(envString("MOG_BLOB_HTTP_BASE", "http://localhost:6000")),
+		blobShards:         envInt("MOG_BLOB_SHARDS", 3),
+		blobMinBytes:       envInt("MOG_BLOB_MIN_BYTES", 256),
+		blobMetaEnable:     envBool("MOG_BLOB_METADATA", false),
+		blobMetaTable:      strings.TrimSpace(envString("MOG_BLOB_METADATA_TABLE", "doc.blob_metadata")),
 		blobInlineReads:    envBool("MOG_BLOB_INLINE_READS", false),
 		blobInlineMaxBytes: envInt("MOG_BLOB_INLINE_MAX_BYTES", 1024*1024),
 		blobInlineStrict:   envBool("MOG_BLOB_INLINE_STRICT", false),

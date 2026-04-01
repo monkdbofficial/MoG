@@ -54,6 +54,7 @@ func CmdFind(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byt
 	}
 
 	var docs []bson.M
+	fieldOrderByID := map[string][]string{}
 	pushedDown := false
 
 	// Preserve Mongo array semantics: exclude `$in` fields from SQL pushdown, then apply the full filter in-memory.
@@ -92,6 +93,7 @@ func CmdFind(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byt
 				docs = make([]bson.M, 0, len(pdocs))
 				for _, pd := range pdocs {
 					docs = append(docs, pd.Doc)
+					fieldOrderByID[fmt.Sprint(pd.Doc["_id"])] = pd.FieldOrder
 				}
 				pushedDown = true
 			}
@@ -133,14 +135,11 @@ func CmdFind(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byt
 		logging.Logger().Debug("find result", zap.String("db", dbName), zap.String("coll", col), zap.String("physical", physical), zap.Int("returned", len(docs)))
 	}
 
-	var firstBatch interface{} = docs
-	if deps.StableFieldOrder {
-		ordered := make([]interface{}, 0, len(docs))
-		for _, d := range docs {
-			ordered = append(ordered, deps.OrderTopLevelDocForReply(d))
-		}
-		firstBatch = ordered
+	ordered := make([]interface{}, 0, len(docs))
+	for _, d := range docs {
+		ordered = append(ordered, deps.OrderTopLevelDocForReply(d, fieldOrderByID[fmt.Sprint(d["_id"])]))
 	}
+	var firstBatch interface{} = ordered
 
 	respDoc := bson.M{
 		"cursor": bson.M{

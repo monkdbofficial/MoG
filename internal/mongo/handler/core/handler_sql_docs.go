@@ -34,8 +34,9 @@ func (h *Handler) ensureDocSchemaExec(ctx context.Context, exec DBExecutor) erro
 }
 
 type pureSQLDoc struct {
-	docID string
-	doc   bson.M
+	docID      string
+	doc        bson.M
+	fieldOrder []string
 }
 
 func decodeDocID(docID string) interface{} {
@@ -126,6 +127,22 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 
 	fields := rows.FieldDescriptions()
 	numFields := len(fields)
+	fieldOrder := make([]string, 0, numFields)
+	for _, fd := range fields {
+		col := string(fd.Name)
+		if col == "" || col == "data" {
+			continue
+		}
+		if col == "id" {
+			fieldOrder = append(fieldOrder, "_id")
+			continue
+		}
+		field := shared.MongoFieldNameForColumn(col)
+		if field == "" {
+			continue
+		}
+		fieldOrder = append(fieldOrder, field)
+	}
 	out := make([]pureSQLDoc, 0, 16) // Pre-allocate small capacity
 	scanStart := time.Now()
 	for rows.Next() {
@@ -218,7 +235,7 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 		// Normalize so any backend-emitted Extended JSON wrappers (e.g. $numberLong)
 		// are rehydrated before we do in-memory match/update logic.
 		normalizeDocForReply(doc)
-		out = append(out, pureSQLDoc{docID: docID, doc: doc})
+		out = append(out, pureSQLDoc{docID: docID, doc: doc, fieldOrder: append([]string(nil), fieldOrder...)})
 	}
 	scanDuration := time.Since(scanStart)
 	totalDuration := time.Since(start)

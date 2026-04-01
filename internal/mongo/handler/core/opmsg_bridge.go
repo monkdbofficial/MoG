@@ -29,9 +29,8 @@ func (a opmsgExecAdapter) Exec(ctx context.Context, sql string, args ...interfac
 
 func (h *Handler) opmsgDeps() opmsg.Deps {
 	return opmsg.Deps{
-		StableFieldOrder: h.stableFieldOrder,
-		LogWriteInfo:     h.logWriteInfo,
-		RemoteAddr:       RemoteAddr,
+		LogWriteInfo: h.logWriteInfo,
+		RemoteAddr:   RemoteAddr,
 
 		NewMsg:      h.newMsg,
 		NewMsgError: h.newMsgError,
@@ -61,7 +60,7 @@ func (h *Handler) opmsgDeps() opmsg.Deps {
 			}
 			out := make([]opmsg.SQLDoc, 0, len(pdocs))
 			for _, pd := range pdocs {
-				out = append(out, opmsg.SQLDoc{Doc: pd.doc, DocID: pd.docID})
+				out = append(out, opmsg.SQLDoc{Doc: pd.doc, DocID: pd.docID, FieldOrder: pd.fieldOrder})
 			}
 			return out, nil
 		},
@@ -76,7 +75,7 @@ func (h *Handler) opmsgDeps() opmsg.Deps {
 			}
 			out := make([]opmsg.SQLDoc, 0, len(pdocs))
 			for _, pd := range pdocs {
-				out = append(out, opmsg.SQLDoc{Doc: pd.doc, DocID: pd.docID})
+				out = append(out, opmsg.SQLDoc{Doc: pd.doc, DocID: pd.docID, FieldOrder: pd.fieldOrder})
 			}
 			return out, nil
 		},

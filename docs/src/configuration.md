@@ -23,7 +23,6 @@ MoG reads configuration from environment variables (see `internal/config/config.
 | Variable | Meaning | Default |
 |---|---|---|
 | `MOG_STORE_RAW_MONGO_JSON` | Mirror full document into a `data` column (`OBJECT(DYNAMIC)`) | `0` |
-| `MOG_STABLE_FIELD_ORDER` | Sort fields for consistent output | `0` |
 | `MOG_INFO_LOG_WRITES` | Info-level logs for write operations | `0` |
 | `MOG_SLOW_QUERY_THRESHOLD_MS` | Slow-query threshold for DB instrumentation (ms) | `100` |
 | `MOG_SLOW_SCAN_THRESHOLD_MS` | Slow-scan threshold for DB instrumentation (ms) | `50` |

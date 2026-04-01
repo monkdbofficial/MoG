@@ -178,7 +178,6 @@ MoG is configured via environment variables or a `.env` file.
 | `MOG_SLOW_SCAN_THRESHOLD_MS` | Slow-scan threshold (ms) for debug diagnostics. | `50` |
 | `MOG_SLOW_ADAPTER_THRESHOLD_MS` | Slow adapter threshold (ms) for debug diagnostics. | `150` |
 | `MOG_STORE_RAW_MONGO_JSON` | Mirror full document into a `data` column (`OBJECT(DYNAMIC)`). | `0` |
-| `MOG_STABLE_FIELD_ORDER` | Sort document fields for consistent output. | `0` |
 | `MOG_INFO_LOG_WRITES` | Enable info-level logs for write operations. | `0` |
 | `MOG_FLOAT_VECTOR_SIMILARITY` | Default similarity used when MoG auto-creates `FLOAT_VECTOR` columns (`euclidean`/`l2`, `cosine`/`cosine_similarity`/`cosine-similarity`, `dot_product`/`dotproduct`/`dot-product`, `maximum_inner_product`/`max_inner_product`/`mips`). | _(empty)_ |
 | `MOG_BLOB_TABLE` | Enable BLOB offload by setting a MonkDB BLOB table name. | _(empty)_ |

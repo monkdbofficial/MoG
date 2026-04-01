@@ -87,26 +87,40 @@ func prepareForObjectPayload(v interface{}) interface{} {
 	}
 }
 
-// orderTopLevelDocForReply makes field order stable for clients:
-// `_id` first, then remaining top-level keys in alphabetical order.
-// This avoids expensive recursive ordering on large result batches.
-func OrderTopLevelDocForReply(m bson.M) bson.D {
+// OrderTopLevelDocForReply makes top-level reply field order stable for clients.
+// Preferred field order is used first (typically SQL/select order), then any
+// remaining keys are appended alphabetically. Nested values are left unchanged.
+func OrderTopLevelDocForReply(m bson.M, preferred []string) bson.D {
 	if m == nil {
 		return bson.D{}
 	}
+	seen := map[string]struct{}{}
+	out := make(bson.D, 0, len(m))
+	for _, key := range preferred {
+		if key == "" {
+			continue
+		}
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		val, ok := m[key]
+		if !ok {
+			continue
+		}
+		out = append(out, bson.DocElem{Name: key, Value: val})
+		seen[key] = struct{}{}
+	}
 	keys := make([]string, 0, len(m))
 	for k := range m {
-		if k == "" || k == "_id" {
+		if k == "" {
+			continue
+		}
+		if _, ok := seen[k]; ok {
 			continue
 		}
 		keys = append(keys, k)
 	}
 	sort.Strings(keys)
-
-	out := make(bson.D, 0, len(m))
-	if id, ok := m["_id"]; ok {
-		out = append(out, bson.DocElem{Name: "_id", Value: id})
-	}
 	for _, k := range keys {
 		out = append(out, bson.DocElem{Name: k, Value: m[k]})
 	}

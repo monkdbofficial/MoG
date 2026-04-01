@@ -2,6 +2,7 @@ package shared
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -110,7 +111,7 @@ func TestOrderTopLevelDocForReply(t *testing.T) {
 		"_id": "x",
 		"a":   1,
 	}
-	out := OrderTopLevelDocForReply(in)
+	out := OrderTopLevelDocForReply(in, nil)
 	if len(out) != 3 {
 		t.Fatalf("unexpected length: %d", len(out))
 	}
@@ -119,6 +120,39 @@ func TestOrderTopLevelDocForReply(t *testing.T) {
 	}
 	if out[1].Name != "a" || out[2].Name != "b" {
 		t.Fatalf("expected alphabetical keys, got: %#v", out)
+	}
+}
+
+func TestOrderTopLevelDocForReply_LeavesNestedValuesUnchanged(t *testing.T) {
+	in := bson.M{
+		"_id": "x",
+		"z": bson.M{
+			"b": 2,
+			"a": 1,
+		},
+		"arr": []interface{}{
+			bson.M{"y": 2, "x": 1},
+		},
+	}
+	out := OrderTopLevelDocForReply(in, nil)
+	if nested, ok := out[2].Value.(bson.M); !ok || nested["a"] != 1 || nested["b"] != 2 {
+		t.Fatalf("expected nested doc left as bson.M, got %#v", out[2].Value)
+	}
+	arr, ok := out[1].Value.([]interface{})
+	if !ok || len(arr) != 1 {
+		t.Fatalf("expected array unchanged, got %#v", out[1].Value)
+	}
+	nestedArrDoc, ok := arr[0].(bson.M)
+	if !ok || nestedArrDoc["x"] != 1 || nestedArrDoc["y"] != 2 {
+		t.Fatalf("expected nested doc inside array unchanged, got %#v", arr[0])
+	}
+}
+
+func TestOrderTopLevelDocForReply_PrefersProvidedOrder(t *testing.T) {
+	in := bson.M{"manager_id": 2, "_id": "u4", "active": false, "name": "Dan", "user_id": 4}
+	out := OrderTopLevelDocForReply(in, []string{"_id", "user_id", "name", "manager_id"})
+	if got := []string{out[0].Name, out[1].Name, out[2].Name, out[3].Name, out[4].Name}; fmt.Sprint(got) != fmt.Sprint([]string{"_id", "user_id", "name", "manager_id", "active"}) {
+		t.Fatalf("unexpected order: %#v", out)
 	}
 }
 

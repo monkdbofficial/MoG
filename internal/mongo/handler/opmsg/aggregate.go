@@ -67,8 +67,9 @@ func CmdAggregate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) (
 	})
 
 	var (
-		baseDocs   []bson.M
-		vectorPlan *vectorSearchPlan
+		baseDocs       []bson.M
+		vectorPlan     *vectorSearchPlan
+		fieldOrderByID = map[string][]string{}
 	)
 
 	pushdownStart := time.Now()
@@ -101,6 +102,7 @@ func CmdAggregate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) (
 				baseDocs = make([]bson.M, 0, len(pdocs))
 				for _, pd := range pdocs {
 					baseDocs = append(baseDocs, pd.Doc)
+					fieldOrderByID[fmt.Sprint(pd.Doc["_id"])] = pd.FieldOrder
 				}
 				pipelineDocs = plan.RemainingPipeline
 			} else {
@@ -194,14 +196,11 @@ func CmdAggregate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) (
 		TotalDuration:          totalDuration,
 		StartedAt:              start,
 	})
-	var firstBatch interface{} = outDocs
-	if deps.StableFieldOrder {
-		ordered := make([]interface{}, 0, len(outDocs))
-		for _, d := range outDocs {
-			ordered = append(ordered, deps.OrderTopLevelDocForReply(d))
-		}
-		firstBatch = ordered
+	ordered := make([]interface{}, 0, len(outDocs))
+	for _, d := range outDocs {
+		ordered = append(ordered, deps.OrderTopLevelDocForReply(d, fieldOrderByID[fmt.Sprint(d["_id"])]))
 	}
+	var firstBatch interface{} = ordered
 	respDoc := bson.M{
 		"cursor": bson.M{
 			"id":         int64(0),
