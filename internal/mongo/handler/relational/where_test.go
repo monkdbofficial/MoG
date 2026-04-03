@@ -4,6 +4,7 @@ import "testing"
 
 import "gopkg.in/mgo.v2/bson"
 
+// TestRelationalAccessor_TopLevel runs the corresponding test case.
 func TestRelationalAccessor_TopLevel(t *testing.T) {
 	acc, ok := relationalAccessor("age")
 	if !ok || acc != "age" {
@@ -11,6 +12,7 @@ func TestRelationalAccessor_TopLevel(t *testing.T) {
 	}
 }
 
+// TestRelationalAccessor_Nested runs the corresponding test case.
 func TestRelationalAccessor_Nested(t *testing.T) {
 	acc, ok := relationalAccessor("addr.city")
 	if !ok || acc != "addr['city']" {
@@ -18,6 +20,7 @@ func TestRelationalAccessor_Nested(t *testing.T) {
 	}
 }
 
+// TestBuildRelationalWhere_NestedEquality runs the corresponding test case.
 func TestBuildRelationalWhere_NestedEquality(t *testing.T) {
 	w, ok, err := BuildWhere(bson.M{"addr.city": "Hyd"})
 	if err != nil || !ok || w == nil {
@@ -31,6 +34,7 @@ func TestBuildRelationalWhere_NestedEquality(t *testing.T) {
 	}
 }
 
+// TestBuildRelationalWhere_NumericCast runs the corresponding test case.
 func TestBuildRelationalWhere_NumericCast(t *testing.T) {
 	w, ok, err := BuildWhere(bson.M{"age": bson.M{"$gt": 25}})
 	if err != nil || !ok || w == nil {
@@ -41,6 +45,7 @@ func TestBuildRelationalWhere_NumericCast(t *testing.T) {
 	}
 }
 
+// TestBuildRelationalWhere_IDEquality_EncodesDocID runs the corresponding test case.
 func TestBuildRelationalWhere_IDEquality_EncodesDocID(t *testing.T) {
 	oid := bson.NewObjectId()
 	w, ok, err := BuildWhere(bson.M{"_id": oid})
@@ -56,6 +61,7 @@ func TestBuildRelationalWhere_IDEquality_EncodesDocID(t *testing.T) {
 	}
 }
 
+// TestBuildRelationalWhere_IDIn_EncodesDocID runs the corresponding test case.
 func TestBuildRelationalWhere_IDIn_EncodesDocID(t *testing.T) {
 	oid1 := bson.NewObjectId()
 	oid2 := bson.NewObjectId()
@@ -74,6 +80,7 @@ func TestBuildRelationalWhere_IDIn_EncodesDocID(t *testing.T) {
 	}
 }
 
+// TestBuildFilterPushdown_SplitsSupportedAndResidualFilters runs the corresponding test case.
 func TestBuildFilterPushdown_SplitsSupportedAndResidualFilters(t *testing.T) {
 	pushdown, err := BuildFilterPushdown(bson.M{
 		"age":     bson.M{"$gt": 25},
@@ -93,6 +100,7 @@ func TestBuildFilterPushdown_SplitsSupportedAndResidualFilters(t *testing.T) {
 	}
 }
 
+// TestBuildFilterPushdown_LeavesInOperatorResidual runs the corresponding test case.
 func TestBuildFilterPushdown_LeavesInOperatorResidual(t *testing.T) {
 	pushdown, err := BuildFilterPushdown(bson.M{
 		"status": bson.M{"$in": []string{"new", "active"}},

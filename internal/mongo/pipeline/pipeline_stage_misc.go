@@ -6,11 +6,12 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// Stage implementations that primarily restructure or combine result sets.
+// applyReplaceRoot evaluates a $replaceRoot stage.
 func applyReplaceRoot(docs []bson.M, spec bson.M) ([]bson.M, error) {
 	return applyReplaceRootVars(docs, spec, nil)
 }
 
+// applyReplaceRootVars is a helper used by the adapter.
 func applyReplaceRootVars(docs []bson.M, spec bson.M, vars map[string]interface{}) ([]bson.M, error) {
 	newRoot, ok := spec["newRoot"]
 	if !ok {
@@ -19,10 +20,12 @@ func applyReplaceRootVars(docs []bson.M, spec bson.M, vars map[string]interface{
 	return applyReplaceWithVars(docs, newRoot, vars)
 }
 
+// applyReplaceWith is a helper used by the adapter.
 func applyReplaceWith(docs []bson.M, expr interface{}) ([]bson.M, error) {
 	return applyReplaceWithVars(docs, expr, nil)
 }
 
+// applyReplaceWithVars is a helper used by the adapter.
 func applyReplaceWithVars(docs []bson.M, expr interface{}, vars map[string]interface{}) ([]bson.M, error) {
 	out := make([]bson.M, 0, len(docs))
 	for _, d := range docs {
@@ -44,10 +47,12 @@ func applyReplaceWithVars(docs []bson.M, expr interface{}, vars map[string]inter
 	return out, nil
 }
 
+// applySortByCount is a helper used by the adapter.
 func applySortByCount(docs []bson.M, expr interface{}) ([]bson.M, error) {
 	return applySortByCountVars(docs, expr, nil)
 }
 
+// applySortByCountVars is a helper used by the adapter.
 func applySortByCountVars(docs []bson.M, expr interface{}, vars map[string]interface{}) ([]bson.M, error) {
 	type state struct {
 		key interface{}
@@ -79,6 +84,7 @@ func applySortByCountVars(docs []bson.M, expr interface{}, vars map[string]inter
 	return out, nil
 }
 
+// applyUnionWith is a helper used by the adapter.
 func applyUnionWith(docs []bson.M, raw interface{}, resolve lookupResolver) ([]bson.M, error) {
 	coll := ""
 	var pipeline []bson.M
@@ -131,6 +137,7 @@ func applyUnionWith(docs []bson.M, raw interface{}, resolve lookupResolver) ([]b
 	return out, nil
 }
 
+// applyFacet is a helper used by the adapter.
 func applyFacet(docs []bson.M, spec bson.M, resolve lookupResolver) ([]bson.M, error) {
 	out := bson.M{}
 	for facetName, rawPipeline := range spec {

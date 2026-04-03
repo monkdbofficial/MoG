@@ -8,11 +8,12 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// $match/$project/$addFields expression plumbing and helpers.
+// applyMatch evaluates a $match stage.
 func applyMatch(docs []bson.M, filter bson.M) []bson.M {
 	return applyMatchWithVars(docs, filter, nil)
 }
 
+// applyMatchWithVars is a helper used by the adapter.
 func applyMatchWithVars(docs []bson.M, filter bson.M, vars map[string]interface{}) []bson.M {
 	var out []bson.M
 	for _, d := range docs {
@@ -23,8 +24,10 @@ func applyMatchWithVars(docs []bson.M, filter bson.M, vars map[string]interface{
 	return out
 }
 
+// matchDoc is a helper used by the adapter.
 func matchDoc(doc bson.M, filter bson.M) bool { return matchDocWithVars(doc, filter, nil) }
 
+// matchDocWithVars is a helper used by the adapter.
 func matchDocWithVars(doc bson.M, filter bson.M, vars map[string]interface{}) bool {
 	// Support $expr at the top level of a $match document.
 	//
@@ -62,6 +65,7 @@ func matchDocWithVars(doc bson.M, filter bson.M, vars map[string]interface{}) bo
 	return true
 }
 
+// docHasOperatorKeys is a helper used by the adapter.
 func docHasOperatorKeys(m bson.M) bool {
 	for k := range m {
 		if strings.HasPrefix(k, "$") {
@@ -71,6 +75,7 @@ func docHasOperatorKeys(m bson.M) bool {
 	return false
 }
 
+// matchOps is a helper used by the adapter.
 func matchOps(fieldVal interface{}, cond bson.M) bool {
 	for op, opVal := range cond {
 		switch op {
@@ -118,6 +123,7 @@ func matchOps(fieldVal interface{}, cond bson.M) bool {
 	return true
 }
 
+// matchEquals is a helper used by the adapter.
 func matchEquals(a, b interface{}) bool {
 	// Per spec: missing fields are treated as None and fail; matchDoc already filtered nil fieldVal.
 	if a == nil || b == nil {
@@ -131,6 +137,7 @@ func matchEquals(a, b interface{}) bool {
 	return reflect.DeepEqual(a, b) || fmt.Sprint(a) == fmt.Sprint(b)
 }
 
+// cmpNumberMatch is a helper used by the adapter.
 func cmpNumberMatch(a, b interface{}, fn func(float64, float64) bool) bool {
 	if a == nil || b == nil {
 		return false
@@ -146,6 +153,7 @@ func cmpNumberMatch(a, b interface{}, fn func(float64, float64) bool) bool {
 	return fn(af, bf)
 }
 
+// toFloat64Match is a helper used by the adapter.
 func toFloat64Match(v interface{}) (float64, bool) {
 	switch x := v.(type) {
 	case int:
@@ -163,6 +171,7 @@ func toFloat64Match(v interface{}) (float64, bool) {
 	}
 }
 
+// coerceInterfaceSlice is a helper used by the adapter.
 func coerceInterfaceSlice(v interface{}) ([]interface{}, bool) {
 	switch t := v.(type) {
 	case []interface{}:
@@ -199,6 +208,7 @@ func coerceInterfaceSlice(v interface{}) ([]interface{}, bool) {
 	}
 }
 
+// scalarIn is a helper used by the adapter.
 func scalarIn(v interface{}, list []interface{}) bool {
 	for _, item := range list {
 		if fmt.Sprint(v) == fmt.Sprint(item) {
@@ -208,6 +218,7 @@ func scalarIn(v interface{}, list []interface{}) bool {
 	return false
 }
 
+// anyIn is a helper used by the adapter.
 func anyIn(arr []interface{}, list []interface{}) bool {
 	for _, el := range arr {
 		if scalarIn(el, list) {
@@ -217,10 +228,12 @@ func anyIn(arr []interface{}, list []interface{}) bool {
 	return false
 }
 
+// applyProject is a helper used by the adapter.
 func applyProject(docs []bson.M, proj bson.M) ([]bson.M, error) {
 	return applyProjectWithVars(docs, proj, nil)
 }
 
+// applyProjectWithVars is a helper used by the adapter.
 func applyProjectWithVars(docs []bson.M, proj bson.M, vars map[string]interface{}) ([]bson.M, error) {
 	include := map[string]bool{}
 	computed := map[string]interface{}{}
@@ -279,6 +292,7 @@ func applyProjectWithVars(docs []bson.M, proj bson.M, vars map[string]interface{
 	return out, nil
 }
 
+// projectIncludeValue is a helper used by the adapter.
 func projectIncludeValue(root interface{}, parts []string) (interface{}, bool) {
 	if len(parts) == 0 {
 		return deepClone(root), true
@@ -311,6 +325,7 @@ func projectIncludeValue(root interface{}, parts []string) (interface{}, bool) {
 	return bson.M{parts[0]: projected}, true
 }
 
+// mergeProjectedDoc is a helper used by the adapter.
 func mergeProjectedDoc(dst bson.M, projected interface{}) {
 	doc, ok := coerceBsonM(projected)
 	if !ok {
@@ -325,6 +340,7 @@ func mergeProjectedDoc(dst bson.M, projected interface{}) {
 	}
 }
 
+// mergeProjectedValue is a helper used by the adapter.
 func mergeProjectedValue(existing, projected interface{}) interface{} {
 	existingDoc, existingIsDoc := coerceBsonM(existing)
 	projectedDoc, projectedIsDoc := coerceBsonM(projected)
@@ -358,10 +374,12 @@ func mergeProjectedValue(existing, projected interface{}) interface{} {
 	return deepClone(projected)
 }
 
+// applyAddFields is a helper used by the adapter.
 func applyAddFields(docs []bson.M, spec bson.M) ([]bson.M, error) {
 	return applyAddFieldsWithVars(docs, spec, nil)
 }
 
+// applyAddFieldsWithVars is a helper used by the adapter.
 func applyAddFieldsWithVars(docs []bson.M, spec bson.M, vars map[string]interface{}) ([]bson.M, error) {
 	out := make([]bson.M, 0, len(docs))
 	for _, d := range docs {
@@ -390,14 +408,17 @@ func applyAddFieldsWithVars(docs []bson.M, spec bson.M, vars map[string]interfac
 	return out, nil
 }
 
+// evalAddFieldsValue is a helper used by the adapter.
 func evalAddFieldsValue(doc bson.M, expr interface{}) (interface{}, error) {
 	return evalAddFieldsValueWithVars(doc, expr, nil)
 }
 
+// evalAddFieldsValueWithVars is a helper used by the adapter.
 func evalAddFieldsValueWithVars(doc bson.M, expr interface{}, vars map[string]interface{}) (interface{}, error) {
 	return evalComputedWithOpts(doc, expr, evalOpts{sizeNonArrayZero: false, vars: stageVars(doc, vars)})
 }
 
+// isArrayValue is a helper used by the adapter.
 func isArrayValue(v interface{}) bool {
 	if v == nil {
 		return false
@@ -416,6 +437,7 @@ func isArrayValue(v interface{}) bool {
 	return false
 }
 
+// isTruthy is a helper used by the adapter.
 func isTruthy(v interface{}) bool {
 	if v == nil {
 		return false
@@ -454,10 +476,12 @@ func isTruthy(v interface{}) bool {
 	}
 }
 
+// evalValue is a helper used by the adapter.
 func evalValue(doc bson.M, v interface{}) (interface{}, error) {
 	return evalValueWithVars(doc, v, nil)
 }
 
+// evalValueWithVars is a helper used by the adapter.
 func evalValueWithVars(doc bson.M, v interface{}, vars map[string]interface{}) (interface{}, error) {
 	// Historically evalValue supported only "$field" and $$ROOT/$$CURRENT; switch to
 	// the shared expression evaluator so $lookup "let" variables behave like MongoDB.

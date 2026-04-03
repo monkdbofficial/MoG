@@ -6,6 +6,7 @@ MoG reads configuration from environment variables (see `internal/config/config.
 
 | Variable | Meaning | Default |
 |---|---|---|
+| `MOG_ENV_FILE` | Optional path to a `.env` file to load (keys only apply if not already set in the process environment) | _(empty)_ |
 | `MOG_DB_HOST` | MonkDB host | `localhost` |
 | `MOG_DB_PORT` | MonkDB port | `5432` |
 | `MOG_DB_USER` | MonkDB username | `monkdb` |
@@ -17,6 +18,7 @@ MoG reads configuration from environment variables (see `internal/config/config.
 | `MOG_LOG_LEVEL` | `debug`/`info`/`warn`/`error` | `info` |
 | `LOG_FILE` | Log file path (empty = STDOUT) | empty |
 | `MOG_METRICS_PORT` | HTTP metrics exporter port | `8080` |
+| `MOG_INFO_LOG_REQUESTS` | Log additional per-stage query logs at `info` (DB/pushdown), beyond request completion | `0` |
 
 ## Storage & behavior
 

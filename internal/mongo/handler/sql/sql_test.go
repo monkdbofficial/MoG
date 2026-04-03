@@ -10,6 +10,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// TestTypeForValue runs the corresponding test case.
 func TestTypeForValue(t *testing.T) {
 	if got := TypeForValue(nil); got != "" {
 		t.Fatalf("expected empty type for nil, got %q", got)
@@ -45,6 +46,7 @@ func TestTypeForValue(t *testing.T) {
 	}
 }
 
+// TestFloatVectorLiteral runs the corresponding test case.
 func TestFloatVectorLiteral(t *testing.T) {
 	lit, n, ok := FloatVectorLiteral([]interface{}{1, 2.5, 3})
 	if !ok {
@@ -68,6 +70,7 @@ func TestFloatVectorLiteral(t *testing.T) {
 	}
 }
 
+// TestArrayArgForSQLType runs the corresponding test case.
 func TestArrayArgForSQLType(t *testing.T) {
 	v, err := ArrayArgForSQLType([]interface{}{"a", "b"}, "ARRAY(TEXT)")
 	if err != nil {
@@ -86,6 +89,7 @@ func TestArrayArgForSQLType(t *testing.T) {
 	}
 }
 
+// TestPgErrorClassification runs the corresponding test case.
 func TestPgErrorClassification(t *testing.T) {
 	wrap := func(e *pgconn.PgError) error { return fmt.Errorf("wrap: %w", e) }
 
@@ -112,6 +116,7 @@ func TestPgErrorClassification(t *testing.T) {
 	}
 }
 
+// TestUniqueViolationAndDuplicateColumnName runs the corresponding test case.
 func TestUniqueViolationAndDuplicateColumnName(t *testing.T) {
 	if !IsUniqueViolation(&pgconn.PgError{Code: "23505"}) {
 		t.Fatalf("expected unique violation by code")

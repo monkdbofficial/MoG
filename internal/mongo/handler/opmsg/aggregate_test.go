@@ -12,6 +12,7 @@ import (
 	"mog/internal/mongo/handler/relational"
 )
 
+// TestParseVectorLimit runs the corresponding test case.
 func TestParseVectorLimit(t *testing.T) {
 	if got, err := parseVectorLimit(int64(5)); err != nil || got != 5 {
 		t.Fatalf("expected limit 5, got %d err %v", got, err)
@@ -21,6 +22,7 @@ func TestParseVectorLimit(t *testing.T) {
 	}
 }
 
+// TestBuildVectorSearchSQL runs the corresponding test case.
 func TestBuildVectorSearchSQL(t *testing.T) {
 	got := buildVectorSearchSQL("testcol", []string{"id", vectorScoreAliasPrefix + "score"}, "embedding", "[0.1,0.2]", 4, 3, "cosine", nil)
 	want := `SELECT id, VECTOR_SIMILARITY(embedding, [0.1,0.2]::float_vector(4), 'cosine') AS "score"
@@ -33,6 +35,7 @@ LIMIT 3`
 	}
 }
 
+// TestBuildVectorSearchSQL_WithPrefilter runs the corresponding test case.
 func TestBuildVectorSearchSQL_WithPrefilter(t *testing.T) {
 	got := buildVectorSearchSQL("testcol", []string{"id", vectorScoreAliasPrefix + "score"}, "embedding", "[0.1,0.2]", 4, 3, "cosine", &relational.Where{SQL: "CAST(age AS DOUBLE PRECISION) >= $1"})
 	want := `SELECT id, VECTOR_SIMILARITY(embedding, [0.1,0.2]::float_vector(4), 'cosine') AS "score"
@@ -45,6 +48,7 @@ LIMIT 3`
 	}
 }
 
+// TestBuildAggregatePrefilterPlan_PartialMatchPushdownKeepsResidualMatch runs the corresponding test case.
 func TestBuildAggregatePrefilterPlan_PartialMatchPushdownKeepsResidualMatch(t *testing.T) {
 	plan, ok, err := buildAggregatePrefilterPlan("test__users", []bson.M{
 		{"$match": bson.M{"age": bson.M{"$gt": 25}, "complex": bson.M{"nested": "x"}}},
@@ -75,6 +79,7 @@ func TestBuildAggregatePrefilterPlan_PartialMatchPushdownKeepsResidualMatch(t *t
 	}
 }
 
+// TestBuildAggregatePrefilterPlan_FullMatchPushdownConsumesMatchAndLimit runs the corresponding test case.
 func TestBuildAggregatePrefilterPlan_FullMatchPushdownConsumesMatchAndLimit(t *testing.T) {
 	plan, ok, err := buildAggregatePrefilterPlan("test__users", []bson.M{
 		{"$match": bson.M{"age": bson.M{"$gte": 21}}},
@@ -95,6 +100,7 @@ func TestBuildAggregatePrefilterPlan_FullMatchPushdownConsumesMatchAndLimit(t *t
 	}
 }
 
+// TestBuildAndExecuteVectorSearchPlan_PushesLeadingMatchIntoSQL runs the corresponding test case.
 func TestBuildAndExecuteVectorSearchPlan_PushesLeadingMatchIntoSQL(t *testing.T) {
 	var gotQuery string
 	var gotArgs []any
@@ -151,6 +157,7 @@ func TestBuildAndExecuteVectorSearchPlan_PushesLeadingMatchIntoSQL(t *testing.T)
 	}
 }
 
+// TestBuildAndExecuteVectorSearchPlan_RejectsNonMatchBeforeVector runs the corresponding test case.
 func TestBuildAndExecuteVectorSearchPlan_RejectsNonMatchBeforeVector(t *testing.T) {
 	_, err := buildAndExecuteVectorSearchPlan(context.Background(), Deps{}, "test__docs", []bson.M{
 		{"$sort": bson.M{"age": 1}},
@@ -165,6 +172,7 @@ func TestBuildAndExecuteVectorSearchPlan_RejectsNonMatchBeforeVector(t *testing.
 	}
 }
 
+// TestAggregateMaxTime_DefaultsAndParses runs the corresponding test case.
 func TestAggregateMaxTime_DefaultsAndParses(t *testing.T) {
 	if got := aggregateMaxTime(bson.M{}); got != 10*time.Second {
 		t.Fatalf("unexpected default max time: %v", got)
@@ -174,6 +182,7 @@ func TestAggregateMaxTime_DefaultsAndParses(t *testing.T) {
 	}
 }
 
+// TestApplyGraphLookupPushdown_Basic runs the corresponding test case.
 func TestApplyGraphLookupPushdown_Basic(t *testing.T) {
 	db := &aggregateFakeDB{
 		rows: &aggregateFakeRows{
@@ -241,14 +250,17 @@ type aggregateExecRecorder struct {
 	execs *[]string
 }
 
+// Query is a helper used by the adapter.
 func (r aggregateExecRecorder) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
 	return nil, nil
 }
 
+// QueryRow is a helper used by the adapter.
 func (r aggregateExecRecorder) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
 	return nil
 }
 
+// Exec is a helper used by the adapter.
 func (r aggregateExecRecorder) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
 	*r.execs = append(*r.execs, sql)
 	return pgconn.CommandTag{}, nil
@@ -262,12 +274,14 @@ type aggregateFakeDB struct {
 	queryRow  pgx.Row
 }
 
+// Query is a helper used by the adapter.
 func (d *aggregateFakeDB) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
 	d.querySQL = sql
 	d.queryArgs = append([]interface{}(nil), args...)
 	return d.rows, nil
 }
 
+// QueryRow is a helper used by the adapter.
 func (d *aggregateFakeDB) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
 	if d.queryRow != nil {
 		return d.queryRow
@@ -275,6 +289,7 @@ func (d *aggregateFakeDB) QueryRow(ctx context.Context, sql string, args ...inte
 	return aggregateFakeRow{vals: []any{int64(0)}}
 }
 
+// Exec is a helper used by the adapter.
 func (d *aggregateFakeDB) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
 	d.execSQL = append(d.execSQL, sql)
 	return pgconn.CommandTag{}, nil
@@ -285,12 +300,21 @@ type aggregateFakeRows struct {
 	i    int
 }
 
-func (r *aggregateFakeRows) Close()                        {}
-func (r *aggregateFakeRows) Err() error                    { return nil }
+// Close is a helper used by the adapter.
+func (r *aggregateFakeRows) Close() {}
+
+// Err is a helper used by the adapter.
+func (r *aggregateFakeRows) Err() error { return nil }
+
+// CommandTag is a helper used by the adapter.
 func (r *aggregateFakeRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
+
+// FieldDescriptions is a helper used by the adapter.
 func (r *aggregateFakeRows) FieldDescriptions() []pgconn.FieldDescription {
 	return nil
 }
+
+// Next is a helper used by the adapter.
 func (r *aggregateFakeRows) Next() bool {
 	if r.i >= len(r.vals) {
 		return false
@@ -298,6 +322,8 @@ func (r *aggregateFakeRows) Next() bool {
 	r.i++
 	return true
 }
+
+// Scan is a helper used by the adapter.
 func (r *aggregateFakeRows) Scan(dest ...any) error {
 	row := r.vals[r.i-1]
 	for idx := range dest {
@@ -312,20 +338,27 @@ func (r *aggregateFakeRows) Scan(dest ...any) error {
 	}
 	return nil
 }
+
+// Values is a helper used by the adapter.
 func (r *aggregateFakeRows) Values() ([]any, error) {
 	if r.i == 0 || r.i > len(r.vals) {
 		return nil, nil
 	}
 	return r.vals[r.i-1], nil
 }
+
+// RawValues is a helper used by the adapter.
 func (r *aggregateFakeRows) RawValues() [][]byte { return nil }
-func (r *aggregateFakeRows) Conn() *pgx.Conn     { return nil }
+
+// Conn is a helper used by the adapter.
+func (r *aggregateFakeRows) Conn() *pgx.Conn { return nil }
 
 type aggregateFakeRow struct {
 	vals []any
 	err  error
 }
 
+// Scan is a helper used by the adapter.
 func (r aggregateFakeRow) Scan(dest ...any) error {
 	if r.err != nil {
 		return r.err

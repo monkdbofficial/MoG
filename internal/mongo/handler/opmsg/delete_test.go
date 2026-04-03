@@ -7,6 +7,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// TestLoadDeleteCandidateDocs_UsesCoarseWhereClause runs the corresponding test case.
 func TestLoadDeleteCandidateDocs_UsesCoarseWhereClause(t *testing.T) {
 	var fullLoadCalled bool
 	var querySQL string

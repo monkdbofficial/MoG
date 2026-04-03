@@ -8,6 +8,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// TestOffloadBlobsInDoc_ErrorsOnOversizeInlineBinaryWhenDisabled runs the corresponding test case.
 func TestOffloadBlobsInDoc_ErrorsOnOversizeInlineBinaryWhenDisabled(t *testing.T) {
 	h := &Handler{
 		blobTable: "", // blob offload disabled
@@ -29,6 +30,7 @@ func TestOffloadBlobsInDoc_ErrorsOnOversizeInlineBinaryWhenDisabled(t *testing.T
 	}
 }
 
+// TestOffloadBlobsInDoc_AllowsSmallInlineBinaryWhenDisabled runs the corresponding test case.
 func TestOffloadBlobsInDoc_AllowsSmallInlineBinaryWhenDisabled(t *testing.T) {
 	h := &Handler{
 		blobTable: "", // blob offload disabled
@@ -44,4 +46,3 @@ func TestOffloadBlobsInDoc_AllowsSmallInlineBinaryWhenDisabled(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
-

@@ -17,6 +17,8 @@ import (
 )
 
 // SQL schema and document loading helpers.
+
+// ensureDocSchema is a helper used by the adapter.
 func (h *Handler) ensureDocSchema(ctx context.Context) error {
 	if h.pool == nil {
 		return nil
@@ -25,6 +27,7 @@ func (h *Handler) ensureDocSchema(ctx context.Context) error {
 	return err
 }
 
+// ensureDocSchemaExec is a helper used by the adapter.
 func (h *Handler) ensureDocSchemaExec(ctx context.Context, exec DBExecutor) error {
 	if exec == nil {
 		return nil
@@ -39,6 +42,7 @@ type pureSQLDoc struct {
 	fieldOrder []string
 }
 
+// decodeDocID is a helper used by the adapter.
 func decodeDocID(docID string) interface{} {
 	if docID == "" {
 		return nil
@@ -51,6 +55,7 @@ func decodeDocID(docID string) interface{} {
 	return docID
 }
 
+// encodeDocID is a helper used by the adapter.
 func encodeDocID(v interface{}) (string, error) {
 	if v == nil {
 		return "", fmt.Errorf("_id is nil")
@@ -62,6 +67,7 @@ func encodeDocID(v interface{}) (string, error) {
 	return string(b), nil
 }
 
+// loadSQLDocsWithIDs is a helper used by the adapter.
 func (h *Handler) loadSQLDocsWithIDs(ctx context.Context, exec DBExecutor, physical string) ([]pureSQLDoc, error) {
 	if exec == nil {
 		return nil, fmt.Errorf("db executor is nil")
@@ -76,6 +82,7 @@ func (h *Handler) loadSQLDocsWithIDs(ctx context.Context, exec DBExecutor, physi
 	return h.loadSQLDocsWithIDsQuery(ctx, exec, "SELECT "+selectList+" FROM doc."+physical)
 }
 
+// docExistsByID is a helper used by the adapter.
 func (h *Handler) docExistsByID(ctx context.Context, exec DBExecutor, physical string, docID string) (bool, error) {
 	if exec == nil {
 		return false, fmt.Errorf("db executor is nil")
@@ -97,6 +104,7 @@ func (h *Handler) docExistsByID(ctx context.Context, exec DBExecutor, physical s
 	return false, err
 }
 
+// loadSQLDocsWithIDsQuery is a helper used by the adapter.
 func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, query string, args ...interface{}) ([]pureSQLDoc, error) {
 	if exec == nil {
 		return nil, fmt.Errorf("db executor is nil")
@@ -260,6 +268,7 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 	return out, nil
 }
 
+// loadSQLDocs is a helper used by the adapter.
 func (h *Handler) loadSQLDocs(ctx context.Context, physical string) ([]bson.M, error) {
 	// For performance and safety under high throughput, never load more than 1000 docs
 	// if pushdown failed. In-memory filtering/sorting is extremely slow.
@@ -278,6 +287,7 @@ func (h *Handler) loadSQLDocs(ctx context.Context, physical string) ([]bson.M, e
 	return out, nil
 }
 
+// selectColumnList is a helper used by the adapter.
 func (h *Handler) selectColumnList(ctx context.Context, exec DBExecutor, physical string) (string, error) {
 	cols, err := h.listColumnsExec(ctx, exec, physical)
 	if err != nil {
@@ -289,6 +299,7 @@ func (h *Handler) selectColumnList(ctx context.Context, exec DBExecutor, physica
 	return strings.Join(orderSelectColumns(cols), ", "), nil
 }
 
+// orderSelectColumns is a helper used by the adapter.
 func orderSelectColumns(cols []string) []string {
 	out := make([]string, 0, len(cols))
 	seen := map[string]struct{}{}
@@ -314,6 +325,7 @@ func orderSelectColumns(cols []string) []string {
 	return out
 }
 
+// queryTableFromQuery is a helper used by the adapter.
 func queryTableFromQuery(query string) string {
 	lower := strings.ToLower(query)
 	if idx := strings.Index(lower, "from "); idx >= 0 {
@@ -326,6 +338,7 @@ func queryTableFromQuery(query string) string {
 	return ""
 }
 
+// ensureCollectionTable is a helper used by the adapter.
 func (h *Handler) ensureCollectionTable(ctx context.Context, collection string) error {
 	if h.pool == nil {
 		return fmt.Errorf("database pool is not configured")
@@ -333,6 +346,7 @@ func (h *Handler) ensureCollectionTable(ctx context.Context, collection string) 
 	return h.ensureCollectionTableExec(ctx, h.pool, collection)
 }
 
+// ensureCollectionTableWithColumnsExec is a helper used by the adapter.
 func (h *Handler) ensureCollectionTableWithColumnsExec(ctx context.Context, exec DBExecutor, collection string, colTypes map[string]string) error {
 	if exec == nil {
 		return fmt.Errorf("db executor is nil")
@@ -374,6 +388,7 @@ func (h *Handler) ensureCollectionTableWithColumnsExec(ctx context.Context, exec
 	return h.ensureCollectionTableExec(ctx, exec, collection)
 }
 
+// ensureCollectionTableExec is a helper used by the adapter.
 func (h *Handler) ensureCollectionTableExec(ctx context.Context, exec DBExecutor, collection string) error {
 	if exec == nil {
 		return fmt.Errorf("db executor is nil")
@@ -447,6 +462,7 @@ func (h *Handler) ensureCollectionTableExec(ctx context.Context, exec DBExecutor
 	return nil
 }
 
+// ensureColumn is a helper used by the adapter.
 func (h *Handler) ensureColumn(ctx context.Context, physical string, col string, sqlType string) error {
 	if h.pool == nil {
 		return fmt.Errorf("database pool is not configured")
@@ -454,6 +470,7 @@ func (h *Handler) ensureColumn(ctx context.Context, physical string, col string,
 	return h.ensureColumnExec(ctx, h.pool, physical, col, sqlType)
 }
 
+// ensureColumnExec is a helper used by the adapter.
 func (h *Handler) ensureColumnExec(ctx context.Context, exec DBExecutor, physical string, col string, sqlType string) error {
 	if exec == nil {
 		return fmt.Errorf("db executor is nil")
@@ -478,6 +495,7 @@ func (h *Handler) ensureColumnExec(ctx context.Context, exec DBExecutor, physica
 	return nil
 }
 
+// listColumns is a helper used by the adapter.
 func (h *Handler) listColumns(ctx context.Context, physical string) ([]string, error) {
 	if h.pool == nil || physical == "" {
 		return nil, nil

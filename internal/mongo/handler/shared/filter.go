@@ -2,6 +2,7 @@ package shared
 
 import "gopkg.in/mgo.v2/bson"
 
+// FilterHasOperator is a helper used by the adapter.
 func FilterHasOperator(filter bson.M, op string) bool {
 	for _, v := range filter {
 		m, ok := CoerceBsonM(v)
@@ -15,6 +16,7 @@ func FilterHasOperator(filter bson.M, op string) bool {
 	return false
 }
 
+// StripOperatorKeys is a helper used by the adapter.
 func StripOperatorKeys(filter bson.M, op string) bson.M {
 	if len(filter) == 0 {
 		return filter

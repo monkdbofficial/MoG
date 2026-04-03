@@ -3,25 +3,40 @@ package opmsg
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 	"gopkg.in/mgo.v2/bson"
 
 	"mog/internal/logging"
+	mongopath "mog/internal/mongo"
 	"mog/internal/mongo/handler/relational"
 	"mog/internal/mongo/handler/shared"
 	mpipeline "mog/internal/mongo/pipeline"
 )
 
+// CmdFind is a helper used by the adapter.
 func CmdFind(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byte, bool, error) {
 	col, ok := cmd["find"].(string)
 	if !ok {
 		return nil, false, nil
 	}
+	start := time.Now()
 
 	dbName := deps.CommandDB(cmd)
 	physical, err := deps.PhysicalCollectionName(dbName, col)
 	if err != nil {
+		mongopath.LogQuery(mongopath.QueryLogOptions{
+			Stage:         mongopath.RequestStageComplete,
+			Method:        "find",
+			Operation:     "find",
+			QueryName:     "find",
+			Table:         "",
+			Rows:          0,
+			Error:         err,
+			TotalDuration: time.Since(start),
+			StartedAt:     start,
+		})
 		resp, rerr := deps.NewMsgError(requestID, 2, "BadValue", err.Error())
 		return resp, true, rerr
 	}
@@ -68,10 +83,32 @@ func CmdFind(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byt
 	if len(pushdownFilter) > 0 || len(sortSpec) > 0 || skip > 0 || limit > 0 {
 		where, ok, err := relational.BuildWhere(pushdownFilter)
 		if err != nil {
+			mongopath.LogQuery(mongopath.QueryLogOptions{
+				Stage:         mongopath.RequestStageComplete,
+				Method:        "find",
+				Operation:     "find",
+				QueryName:     "find",
+				Table:         physical,
+				Rows:          0,
+				Error:         err,
+				TotalDuration: time.Since(start),
+				StartedAt:     start,
+			})
 			return nil, true, err
 		}
 		orderBy, ok2, err := relational.BuildOrderBy(sortSpec)
 		if err != nil {
+			mongopath.LogQuery(mongopath.QueryLogOptions{
+				Stage:         mongopath.RequestStageComplete,
+				Method:        "find",
+				Operation:     "find",
+				QueryName:     "find",
+				Table:         physical,
+				Rows:          0,
+				Error:         err,
+				TotalDuration: time.Since(start),
+				StartedAt:     start,
+			})
 			return nil, true, err
 		}
 		if ok && ok2 {
@@ -104,6 +141,17 @@ func CmdFind(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byt
 	if !pushedDown {
 		pdocs, err := deps.LoadSQLDocsWithIDs(ctx, physical)
 		if err != nil {
+			mongopath.LogQuery(mongopath.QueryLogOptions{
+				Stage:         mongopath.RequestStageComplete,
+				Method:        "find",
+				Operation:     "find",
+				QueryName:     "find",
+				Table:         physical,
+				Rows:          0,
+				Error:         err,
+				TotalDuration: time.Since(start),
+				StartedAt:     start,
+			})
 			return nil, true, err
 		}
 		docs = make([]bson.M, 0, len(pdocs))
@@ -132,6 +180,17 @@ func CmdFind(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byt
 	}
 	for _, d := range docs {
 		if err := deps.NormalizeDocForReply(ctx, d); err != nil {
+			mongopath.LogQuery(mongopath.QueryLogOptions{
+				Stage:         mongopath.RequestStageComplete,
+				Method:        "find",
+				Operation:     "find",
+				QueryName:     "find",
+				Table:         physical,
+				Rows:          0,
+				Error:         err,
+				TotalDuration: time.Since(start),
+				StartedAt:     start,
+			})
 			return nil, true, err
 		}
 	}
@@ -156,5 +215,16 @@ func CmdFind(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byt
 	}
 
 	resp, err := deps.NewMsg(requestID, respDoc)
+	mongopath.LogQuery(mongopath.QueryLogOptions{
+		Stage:         mongopath.RequestStageComplete,
+		Method:        "find",
+		Operation:     "find",
+		QueryName:     "find",
+		Table:         physical,
+		Rows:          len(docs),
+		Error:         err,
+		TotalDuration: time.Since(start),
+		StartedAt:     start,
+	})
 	return resp, true, err
 }

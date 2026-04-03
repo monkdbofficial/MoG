@@ -5,6 +5,7 @@ import (
 	"testing"
 )
 
+// TestSQLTypeForFieldVectorSimilarity runs the corresponding test case.
 func TestSQLTypeForFieldVectorSimilarity(t *testing.T) {
 	restore := setEnv("MOG_FLOAT_VECTOR_SIMILARITY", "cosine_similarity")
 	defer restore()
@@ -18,6 +19,7 @@ func TestSQLTypeForFieldVectorSimilarity(t *testing.T) {
 	}
 }
 
+// TestSQLTypeForFieldVectorSimilarityInvalid runs the corresponding test case.
 func TestSQLTypeForFieldVectorSimilarityInvalid(t *testing.T) {
 	restore := setEnv("MOG_FLOAT_VECTOR_SIMILARITY", "invalid")
 	defer restore()
@@ -31,6 +33,7 @@ func TestSQLTypeForFieldVectorSimilarityInvalid(t *testing.T) {
 	}
 }
 
+// setEnv is a helper used by the adapter.
 func setEnv(key, value string) func() {
 	prev, had := os.LookupEnv(key)
 	if err := os.Setenv(key, value); err != nil {

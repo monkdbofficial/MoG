@@ -194,11 +194,8 @@ MoG is configured via environment variables or a `.env` file.
 
 MoG can offload large `BinData` fields to MonkDB BLOB tables to avoid oversized inline base64 payloads.
 
-1. Create a BLOB table:
-   ```sql
-   CREATE BLOB TABLE media CLUSTERED INTO 3 SHARDS;
-   ```
-2. Configure MoG:
+
+1. Configure MoG:
    ```bash
    export MOG_BLOB_TABLE=media
    export MOG_BLOB_HTTP_BASE=http://localhost:6000

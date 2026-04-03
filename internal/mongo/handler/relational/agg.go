@@ -18,7 +18,7 @@ type AggPlan struct {
 	ConsumedStages int
 }
 
-// buildRelationalAggPrefixPlan attempts to translate the longest safe prefix of an aggregation pipeline
+// BuildAggPrefixPlan attempts to translate the longest safe prefix of an aggregation pipeline
 // into SQL over relational columns.
 //
 // Supported prefix:

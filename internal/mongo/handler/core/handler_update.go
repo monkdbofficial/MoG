@@ -16,6 +16,7 @@ import (
 	mupdate "mog/internal/mongo/update"
 )
 
+// applyDynamicUpdate is a helper used by the adapter.
 func (h *Handler) applyDynamicUpdate(ctx context.Context, tx pgx.Tx, physical string, filter bson.M, update bson.M, multi bool) (matched int, modified int, err error) {
 	if h.pool == nil {
 		return 0, 0, fmt.Errorf("database pool is not configured")
@@ -94,6 +95,7 @@ func (h *Handler) applyDynamicUpdate(ctx context.Context, tx pgx.Tx, physical st
 	return matched, modified, nil
 }
 
+// stringifyID is a helper used by the adapter.
 func stringifyID(v interface{}) string {
 	switch t := v.(type) {
 	case string:
@@ -105,6 +107,7 @@ func stringifyID(v interface{}) string {
 	}
 }
 
+// applyPureSQLUpdate is a helper used by the adapter.
 func (h *Handler) applyPureSQLUpdate(ctx context.Context, exec DBExecutor, physical string, filter bson.M, update bson.M, multi bool, upsert bool) (matched int, modified int, upsertedID interface{}, err error) {
 	if h.pool == nil {
 		return 0, 0, nil, fmt.Errorf("database pool is not configured")
@@ -304,6 +307,7 @@ func (h *Handler) applyPureSQLUpdate(ctx context.Context, exec DBExecutor, physi
 	return matched, modified, nil, nil
 }
 
+// loadCandidateSQLDocsWithIDs is a helper used by the adapter.
 func (h *Handler) loadCandidateSQLDocsWithIDs(ctx context.Context, exec DBExecutor, physical string, filter bson.M, single bool) ([]pureSQLDoc, bson.M, error) {
 	pushdown, err := relational.BuildFilterPushdown(filter)
 	if err != nil {
@@ -331,6 +335,7 @@ func (h *Handler) loadCandidateSQLDocsWithIDs(ctx context.Context, exec DBExecut
 	return pdocs, filter, err
 }
 
+// candidateSelectList is a helper used by the adapter.
 func (h *Handler) candidateSelectList(ctx context.Context, exec DBExecutor, physical string, filter bson.M) (string, error) {
 	_ = ctx
 	_ = exec
@@ -355,6 +360,7 @@ func (h *Handler) candidateSelectList(ctx context.Context, exec DBExecutor, phys
 	return strings.Join(out, ", "), nil
 }
 
+// filterFieldRoots is a helper used by the adapter.
 func filterFieldRoots(filter bson.M) []string {
 	roots := map[string]struct{}{}
 	var walk func(bson.M)
@@ -384,6 +390,7 @@ func filterFieldRoots(filter bson.M) []string {
 	return out
 }
 
+// mustListColumnsExec is a helper used by the adapter.
 func mustListColumnsExec(ctx context.Context, h *Handler, exec DBExecutor, physical string) []string {
 	cols, err := h.listColumnsExec(ctx, exec, physical)
 	if err != nil || len(cols) == 0 {
@@ -392,6 +399,7 @@ func mustListColumnsExec(ctx context.Context, h *Handler, exec DBExecutor, physi
 	return cols
 }
 
+// sortedNeededColumns is a helper used by the adapter.
 func sortedNeededColumns(cols map[string]struct{}) []string {
 	out := make([]string, 0, len(cols))
 	for col := range cols {
@@ -401,6 +409,7 @@ func sortedNeededColumns(cols map[string]struct{}) []string {
 	return out
 }
 
+// orderNeededColumns is a helper used by the adapter.
 func orderNeededColumns(cols []string) []string {
 	available := map[string]struct{}{}
 	for _, col := range cols {
@@ -432,6 +441,7 @@ func orderNeededColumns(cols []string) []string {
 	return out
 }
 
+// isReplacementUpdateDoc is a helper used by the adapter.
 func isReplacementUpdateDoc(update bson.M) bool {
 	for k := range update {
 		if strings.HasPrefix(k, "$") {
@@ -441,6 +451,7 @@ func isReplacementUpdateDoc(update bson.M) bool {
 	return true
 }
 
+// cloneBsonM is a helper used by the adapter.
 func cloneBsonM(in bson.M) bson.M {
 	if in == nil {
 		return bson.M{}
@@ -452,6 +463,7 @@ func cloneBsonM(in bson.M) bson.M {
 	return out
 }
 
+// canonicalStorageIDAndDocID is a helper used by the adapter.
 func canonicalStorageIDAndDocID(rawID interface{}) (storageID interface{}, docID string, ok bool, err error) {
 	if rawID == nil {
 		return nil, "", false, nil

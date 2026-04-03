@@ -11,11 +11,12 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// $group stage and shared type/sort helpers.
+// applyGroup evaluates a $group stage.
 func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 	return applyGroupWithVars(docs, spec, nil)
 }
 
+// applyGroupWithVars is a helper used by the adapter.
 func applyGroupWithVars(docs []bson.M, spec bson.M, vars map[string]interface{}) ([]bson.M, error) {
 	rawID, ok := spec["_id"]
 	if !ok {
@@ -245,6 +246,7 @@ func applyGroupWithVars(docs []bson.M, spec bson.M, vars map[string]interface{})
 	return out, nil
 }
 
+// addToSetKey is a helper used by the adapter.
 func addToSetKey(v interface{}) string {
 	if v == nil {
 		return "nil"
@@ -273,10 +275,12 @@ func addToSetKey(v interface{}) string {
 	return fmt.Sprintf("%T:%v", v, v)
 }
 
+// evalGroupID is a helper used by the adapter.
 func evalGroupID(doc bson.M, rawID interface{}) (interface{}, error) {
 	return evalGroupIDWithVars(doc, rawID, nil)
 }
 
+// evalGroupIDWithVars is a helper used by the adapter.
 func evalGroupIDWithVars(doc bson.M, rawID interface{}, vars map[string]interface{}) (interface{}, error) {
 	// Field path: "$age" (fast-path).
 	if s, ok := rawID.(string); ok && len(s) > 1 && s[0] == '$' {
@@ -290,6 +294,7 @@ func evalGroupIDWithVars(doc bson.M, rawID interface{}, vars map[string]interfac
 	return rawID, nil
 }
 
+// isNumericOne is a helper used by the adapter.
 func isNumericOne(v interface{}) bool {
 	switch x := v.(type) {
 	case int:
@@ -307,6 +312,7 @@ func isNumericOne(v interface{}) bool {
 	}
 }
 
+// applySort is a helper used by the adapter.
 func applySort(docs []bson.M, spec bson.M) []bson.M {
 	type keyDir struct {
 		key string
@@ -359,6 +365,7 @@ func applySort(docs []bson.M, spec bson.M) []bson.M {
 	return docs
 }
 
+// cmpNumber is a helper used by the adapter.
 func cmpNumber(a, b interface{}, fn func(float64, float64) bool) bool {
 	af, ok := toFloat64(a)
 	if !ok {
@@ -371,6 +378,7 @@ func cmpNumber(a, b interface{}, fn func(float64, float64) bool) bool {
 	return fn(af, bf)
 }
 
+// lessValue is a helper used by the adapter.
 func lessValue(a, b interface{}) bool {
 	if af, ok := toFloat64(a); ok {
 		if bf, ok := toFloat64(b); ok {
@@ -380,6 +388,7 @@ func lessValue(a, b interface{}) bool {
 	return fmt.Sprint(a) < fmt.Sprint(b)
 }
 
+// mongoTypeOf is a helper used by the adapter.
 func mongoTypeOf(v interface{}) interface{} {
 	if v == nil {
 		return "null"
@@ -408,6 +417,7 @@ func mongoTypeOf(v interface{}) interface{} {
 	}
 }
 
+// convertTo is a helper used by the adapter.
 func convertTo(to string, v interface{}) (interface{}, bool) {
 	switch to {
 	case "string":
@@ -457,6 +467,7 @@ func convertTo(to string, v interface{}) (interface{}, bool) {
 	}
 }
 
+// toInt64IfIntegral is a helper used by the adapter.
 func toInt64IfIntegral(v interface{}) (int64, bool) {
 	switch x := v.(type) {
 	case int:
@@ -488,6 +499,7 @@ func toInt64IfIntegral(v interface{}) (int64, bool) {
 	}
 }
 
+// toFloat64 is a helper used by the adapter.
 func toFloat64(v interface{}) (float64, bool) {
 	switch x := v.(type) {
 	case int:
@@ -511,6 +523,7 @@ func toFloat64(v interface{}) (float64, bool) {
 	}
 }
 
+// asInt is a helper used by the adapter.
 func asInt(v interface{}) (int, error) {
 	switch x := v.(type) {
 	case int:

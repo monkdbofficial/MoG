@@ -13,6 +13,7 @@ import (
 	mpipeline "mog/internal/mongo/pipeline"
 )
 
+// TypeForValue is a helper used by the adapter.
 func TypeForValue(v interface{}) string {
 	if v == nil {
 		return ""
@@ -58,6 +59,7 @@ func TypeForValue(v interface{}) string {
 	}
 }
 
+// arrayElementType is a helper used by the adapter.
 func arrayElementType(arr []interface{}) (string, bool) {
 	if len(arr) == 0 {
 		return "", false
@@ -202,6 +204,7 @@ func arrayElementType(arr []interface{}) (string, bool) {
 	}
 }
 
+// coerceFloat64Slice is a helper used by the adapter.
 func coerceFloat64Slice(arr []interface{}) ([]float64, bool) {
 	out := make([]float64, 0, len(arr))
 	for _, el := range arr {
@@ -217,6 +220,7 @@ func coerceFloat64Slice(arr []interface{}) ([]float64, bool) {
 	return out, true
 }
 
+// FloatVectorLiteral is a helper used by the adapter.
 func FloatVectorLiteral(v interface{}) (string, int, bool) {
 	arr, ok := shared.CoerceInterfaceSlice(v)
 	if !ok {

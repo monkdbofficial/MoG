@@ -13,6 +13,8 @@ import (
 )
 
 // SQL-backed write helpers.
+
+// updateRowFromDoc is a helper used by the adapter.
 func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physical string, docID string, doc bson.M) error {
 	if exec == nil || physical == "" || docID == "" {
 		return nil
@@ -159,6 +161,7 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 	return nil
 }
 
+// insertRowFromDoc is a helper used by the adapter.
 func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physical string, docID string, doc bson.M) error {
 	if exec == nil || physical == "" || docID == "" {
 		return nil
@@ -300,6 +303,7 @@ func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physica
 	return err
 }
 
+// keysFromDoc is a helper used by the adapter.
 func keysFromDoc(doc bson.M) []string {
 	keys := make([]string, 0, len(doc))
 	for k := range doc {

@@ -44,6 +44,7 @@ func coerceBsonM(v interface{}) (bson.M, bool) {
 	}
 }
 
+// marshalObject is a helper used by the adapter.
 func marshalObject(v interface{}) (string, error) {
 	// Prefer mgo/bson's JSON marshaler so BSON-specific types produced by drivers
 	// (e.g. ObjectId, Date, Binary) become valid JSON.
@@ -58,6 +59,7 @@ func marshalObject(v interface{}) (string, error) {
 	return string(b), nil
 }
 
+// coerceFloat64Slice is a helper used by the adapter.
 func coerceFloat64Slice(arr []interface{}) ([]float64, bool) {
 	out := make([]float64, 0, len(arr))
 	for _, v := range arr {
@@ -79,6 +81,7 @@ func coerceFloat64Slice(arr []interface{}) ([]float64, bool) {
 	return out, true
 }
 
+// unsetPathValue is a helper used by the adapter.
 func unsetPathValue(doc bson.M, path string) {
 	if path == "" {
 		return

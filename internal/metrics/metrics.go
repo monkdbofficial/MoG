@@ -25,11 +25,13 @@ var (
 	)
 )
 
+// init initializes package-level state.
 func init() {
 	prometheus.MustRegister(mongoCommandsTotal)
 	prometheus.MustRegister(mongoCommandDurationSeconds)
 }
 
+// ObserveMongoCommand is a helper used by the adapter.
 func ObserveMongoCommand(proto, cmd string, dur time.Duration) {
 	if proto == "" {
 		proto = "unknown"
@@ -40,4 +42,3 @@ func ObserveMongoCommand(proto, cmd string, dur time.Duration) {
 	mongoCommandsTotal.WithLabelValues(proto, cmd).Inc()
 	mongoCommandDurationSeconds.WithLabelValues(proto, cmd).Observe(dur.Seconds())
 }
-

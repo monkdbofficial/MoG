@@ -2,6 +2,7 @@ package mongo
 
 import "testing"
 
+// TestNormalizeVectorSimilarity runs the corresponding test case.
 func TestNormalizeVectorSimilarity(t *testing.T) {
 	tests := map[string]string{
 		"euclidean":             "euclidean",

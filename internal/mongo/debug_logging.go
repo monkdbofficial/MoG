@@ -21,6 +21,7 @@ const (
 	slowQueryEnv         = "MOG_SLOW_QUERY_THRESHOLD_MS"
 	slowScanEnv          = "MOG_SLOW_SCAN_THRESHOLD_MS"
 	slowAdapterEnv       = "MOG_SLOW_ADAPTER_THRESHOLD_MS"
+	infoRequestsEnv      = "MOG_INFO_LOG_REQUESTS"
 	defaultSlowQueryMS   = 100
 	defaultSlowScanMS    = 50
 	defaultSlowAdapterMS = 150
@@ -67,6 +68,7 @@ type QueryLogOptions struct {
 	QueryHash              uint64
 }
 
+// loadThresholds is a helper used by the adapter.
 func loadThresholds() {
 	thresholdOnce.Do(func() {
 		thresholds.query = envIntWithDefault(slowQueryEnv, defaultSlowQueryMS)
@@ -75,6 +77,7 @@ func loadThresholds() {
 	})
 }
 
+// envIntWithDefault is a helper used by the adapter.
 func envIntWithDefault(key string, def int) int {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {
@@ -84,6 +87,7 @@ func envIntWithDefault(key string, def int) int {
 	return def
 }
 
+// adapterLogger is a helper used by the adapter.
 func adapterLogger() (*zap.Logger, bool) {
 	logger := logging.Logger()
 	if logger == nil {
@@ -98,11 +102,25 @@ func adapterLogger() (*zap.Logger, bool) {
 	), true
 }
 
+// adapterBaseLogger returns a logger with stable adapter-identifying fields.
+func adapterBaseLogger() *zap.Logger {
+	logger := logging.Logger()
+	if logger == nil {
+		return nil
+	}
+	return logger.With(
+		zap.String("component", componentField),
+		zap.String("adapter", adapterName),
+	)
+}
+
+// AdapterDebugEnabled is a helper used by the adapter.
 func AdapterDebugEnabled() bool {
 	logger := logging.Logger()
 	return logger != nil && logger.Core().Enabled(zap.DebugLevel)
 }
 
+// AdapterDebug is a helper used by the adapter.
 func AdapterDebug(stage string, fields ...zap.Field) {
 	if logger, ok := adapterLogger(); ok {
 		all := append([]zap.Field{zap.String("stage", stage)}, fields...)
@@ -110,6 +128,7 @@ func AdapterDebug(stage string, fields ...zap.Field) {
 	}
 }
 
+// AdapterWarn is a helper used by the adapter.
 func AdapterWarn(stage string, fields ...zap.Field) {
 	logger := logging.Logger()
 	if logger == nil {
@@ -123,6 +142,7 @@ func AdapterWarn(stage string, fields ...zap.Field) {
 	logger.Warn("adapter warning", all...)
 }
 
+// AdapterError is a helper used by the adapter.
 func AdapterError(stage string, err error, fields ...zap.Field) {
 	logger := logging.Logger()
 	if logger == nil {
@@ -136,8 +156,10 @@ func AdapterError(stage string, err error, fields ...zap.Field) {
 	logger.Error("adapter error", append(all, zap.Error(err))...)
 }
 
+// LogQuery is a helper used by the adapter.
 func LogQuery(opts QueryLogOptions) {
-	if !AdapterDebugEnabled() {
+	logger := adapterBaseLogger()
+	if logger == nil {
 		return
 	}
 	if opts.Stage == "" {
@@ -171,6 +193,7 @@ func LogQuery(opts QueryLogOptions) {
 	}
 
 	fields := []zap.Field{
+		zap.String("stage", opts.Stage),
 		zap.String("method", opts.Method),
 		zap.String("operation", opts.Operation),
 		zap.String("query_name", opts.QueryName),
@@ -196,13 +219,45 @@ func LogQuery(opts QueryLogOptions) {
 		zap.Bool("slow_adapter_call", slowAdapter),
 	}
 	opts.FieldsCleanup()
-	AdapterDebug(opts.Stage, append(fields, zap.String("sql", opts.QueryTemplate))...)
+
+	// Avoid logging large SQL strings during normal request logs. Include SQL only
+	// when debugging or when it helps troubleshoot slow calls/failures.
+	includeSQL := AdapterDebugEnabled() || opts.Error != nil || slowQuery || slowScan || slowAdapter
+	if includeSQL && opts.QueryTemplate != "" {
+		fields = append(fields, zap.String("sql", opts.QueryTemplate))
+	}
+	if opts.Error != nil {
+		fields = append(fields, zap.Error(opts.Error))
+	}
+
+	// Production-oriented logging:
+	// - Debug mode: log all stages.
+	// - Errors: always log.
+	// - Request completion: log at info for response-time visibility.
+	// - Slow calls: log at warn.
+	// - Other stages: log only if explicitly enabled via MOG_INFO_LOG_REQUESTS.
+	switch {
+	case AdapterDebugEnabled():
+		logger.Debug("mongo query", fields...)
+	case opts.Error != nil:
+		logger.Error("mongo query", fields...)
+	case slowQuery || slowScan || slowAdapter:
+		logger.Warn("mongo query", fields...)
+	case opts.Stage == RequestStageComplete:
+		logger.Info("mongo request", fields...)
+	default:
+		if v := strings.TrimSpace(os.Getenv(infoRequestsEnv)); v != "" && v != "0" && strings.ToLower(v) != "false" {
+			logger.Info("mongo query", fields...)
+		}
+	}
 }
 
+// durationMillis is a helper used by the adapter.
 func durationMillis(d time.Duration) float64 {
 	return float64(d.Milliseconds())
 }
 
+// FieldsCleanup is a helper used by the adapter.
 func (opts *QueryLogOptions) FieldsCleanup() {
 	if len(opts.SortFields) == 0 {
 		opts.SortFields = nil
@@ -215,12 +270,14 @@ func (opts *QueryLogOptions) FieldsCleanup() {
 	}
 }
 
+// QueryHash is a helper used by the adapter.
 func QueryHash(sql string) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(sql))
 	return h.Sum64()
 }
 
+// StageNames is a helper used by the adapter.
 func StageNames(pipeline []bson.M) []string {
 	names := make([]string, 0, len(pipeline))
 	for _, stage := range pipeline {
@@ -231,6 +288,7 @@ func StageNames(pipeline []bson.M) []string {
 	return names
 }
 
+// MatchFieldNames is a helper used by the adapter.
 func MatchFieldNames(pipeline []bson.M) []string {
 	set := map[string]struct{}{}
 	for _, stage := range pipeline {
@@ -243,6 +301,7 @@ func MatchFieldNames(pipeline []bson.M) []string {
 	return mapKeysSorted(set)
 }
 
+// SortFields is a helper used by the adapter.
 func SortFields(pipeline []bson.M) []string {
 	set := map[string]struct{}{}
 	for _, stage := range pipeline {
@@ -255,6 +314,7 @@ func SortFields(pipeline []bson.M) []string {
 	return mapKeysSorted(set)
 }
 
+// Pagination is a helper used by the adapter.
 func Pagination(pipeline []bson.M) (limit, skip int) {
 	for _, stage := range pipeline {
 		if raw, ok := stage["$limit"]; ok {
@@ -271,6 +331,7 @@ func Pagination(pipeline []bson.M) (limit, skip int) {
 	return
 }
 
+// AggregationIntent is a helper used by the adapter.
 func AggregationIntent(pipeline []bson.M) string {
 	intent := []string{}
 	for _, stage := range pipeline {
@@ -290,6 +351,7 @@ func AggregationIntent(pipeline []bson.M) string {
 	return strings.Join(intent, ",")
 }
 
+// mapKeysSorted is a helper used by the adapter.
 func mapKeysSorted(set map[string]struct{}) []string {
 	keys := make([]string, 0, len(set))
 	for k := range set {
@@ -299,6 +361,7 @@ func mapKeysSorted(set map[string]struct{}) []string {
 	return keys
 }
 
+// toInt is a helper used by the adapter.
 func toInt(v interface{}) (int, bool) {
 	switch n := v.(type) {
 	case int:
@@ -316,6 +379,7 @@ func toInt(v interface{}) (int, bool) {
 	}
 }
 
+// sanitizeFilterSummary is a helper used by the adapter.
 func sanitizeFilterSummary(stage bson.M) []string {
 	if stage == nil {
 		return nil

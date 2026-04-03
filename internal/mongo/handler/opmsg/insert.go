@@ -4,22 +4,36 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"gopkg.in/mgo.v2/bson"
 
 	"mog/internal/logging"
+	mongopath "mog/internal/mongo"
 )
 
+// CmdInsert is a helper used by the adapter.
 func CmdInsert(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byte, bool, error) {
 	col, ok := cmd["insert"].(string)
 	if !ok {
 		return nil, false, nil
 	}
+	start := time.Now()
 
 	dbName := deps.CommandDB(cmd)
 	physical, err := deps.PhysicalCollectionName(dbName, col)
 	if err != nil {
+		mongopath.LogQuery(mongopath.QueryLogOptions{
+			Stage:         mongopath.RequestStageComplete,
+			Method:        "insert",
+			Operation:     "insert",
+			QueryName:     "insert",
+			Table:         "",
+			Error:         err,
+			TotalDuration: time.Since(start),
+			StartedAt:     start,
+		})
 		resp, rerr := deps.NewMsgError(requestID, 2, "BadValue", err.Error())
 		return resp, true, rerr
 	}
@@ -44,6 +58,16 @@ func CmdInsert(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 		}
 	}
 	if !ok {
+		mongopath.LogQuery(mongopath.QueryLogOptions{
+			Stage:         mongopath.RequestStageComplete,
+			Method:        "insert",
+			Operation:     "insert",
+			QueryName:     "insert",
+			Table:         physical,
+			Error:         fmt.Errorf("documents must be an array"),
+			TotalDuration: time.Since(start),
+			StartedAt:     start,
+		})
 		return nil, true, fmt.Errorf("documents must be an array")
 	}
 
@@ -66,9 +90,29 @@ func CmdInsert(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 					resp, rerr := deps.NewMsgError(requestID, 11000, "DuplicateKey", err.Error())
 					return resp, true, rerr
 				}
+				mongopath.LogQuery(mongopath.QueryLogOptions{
+					Stage:         mongopath.RequestStageComplete,
+					Method:        "insert",
+					Operation:     "insert",
+					QueryName:     "insert",
+					Table:         physical,
+					Error:         err,
+					TotalDuration: time.Since(start),
+					StartedAt:     start,
+				})
 				return nil, true, err
 			}
 		} else {
+			mongopath.LogQuery(mongopath.QueryLogOptions{
+				Stage:         mongopath.RequestStageComplete,
+				Method:        "insert",
+				Operation:     "insert",
+				QueryName:     "insert",
+				Table:         physical,
+				Error:         err,
+				TotalDuration: time.Since(start),
+				StartedAt:     start,
+			})
 			return nil, true, err
 		}
 	}
@@ -100,5 +144,16 @@ func CmdInsert(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 	respDoc := bson.M{"n": n, "ok": 1.0}
 
 	resp, err := deps.NewMsg(requestID, respDoc)
+	mongopath.LogQuery(mongopath.QueryLogOptions{
+		Stage:         mongopath.RequestStageComplete,
+		Method:        "insert",
+		Operation:     "insert",
+		QueryName:     "insert",
+		Table:         physical,
+		RowsAffected:  inserted,
+		Error:         err,
+		TotalDuration: time.Since(start),
+		StartedAt:     start,
+	})
 	return resp, true, err
 }

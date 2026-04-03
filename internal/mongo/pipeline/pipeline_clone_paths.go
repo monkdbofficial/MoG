@@ -7,7 +7,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// Document cloning and dotted-path helpers used by multiple pipeline stages.
+// deepCloneDoc clones a BSON document recursively.
 func deepCloneDoc(doc bson.M) bson.M {
 	out := bson.M{}
 	for k, v := range doc {
@@ -16,6 +16,7 @@ func deepCloneDoc(doc bson.M) bson.M {
 	return out
 }
 
+// deepClone is a helper used by the adapter.
 func deepClone(v interface{}) interface{} {
 	if v == nil {
 		return nil
@@ -90,6 +91,7 @@ func deepClone(v interface{}) interface{} {
 	}
 }
 
+// getPathValue is a helper used by the adapter.
 func getPathValue(doc bson.M, path string) interface{} {
 	if path == "" {
 		return nil
@@ -110,6 +112,7 @@ func getPathValue(doc bson.M, path string) interface{} {
 	return cur
 }
 
+// cloneDocForSetPath is a helper used by the adapter.
 func cloneDocForSetPath(doc bson.M, path string) bson.M {
 	nd := bson.M{}
 	for k, v := range doc {
@@ -146,6 +149,7 @@ func cloneDocForSetPath(doc bson.M, path string) bson.M {
 	return nd
 }
 
+// setPathValue is a helper used by the adapter.
 func setPathValue(doc bson.M, path string, value interface{}) {
 	if path == "" {
 		return

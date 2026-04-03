@@ -20,6 +20,7 @@ import (
 	mpipeline "mog/internal/mongo/pipeline"
 )
 
+// CmdAggregate is a helper used by the adapter.
 func CmdAggregate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byte, bool, error) {
 	col, ok := cmd["aggregate"].(string)
 	if !ok {
@@ -224,6 +225,7 @@ func CmdAggregate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) (
 	return resp, true, err
 }
 
+// executeAggregateStages is a helper used by the adapter.
 func executeAggregateStages(ctx context.Context, deps Deps, dbName string, docs []bson.M, pipeline []bson.M, resolveLookup func(from string) ([]bson.M, error), timeout time.Duration) ([]bson.M, error) {
 	current := docs
 	for _, stage := range pipeline {
@@ -266,6 +268,7 @@ type vectorProjectionPlan struct {
 
 const vectorScoreAliasPrefix = "__vector_score_alias__:"
 
+// buildAndExecuteVectorSearchPlan is a helper used by the adapter.
 func buildAndExecuteVectorSearchPlan(ctx context.Context, deps Deps, physical string, pipeline []bson.M, timeout time.Duration) (*vectorSearchPlan, error) {
 	stageIndex := -1
 	var spec bson.M
@@ -324,6 +327,7 @@ func buildAndExecuteVectorSearchPlan(ctx context.Context, deps Deps, physical st
 	}, nil
 }
 
+// executeVectorSearch is a helper used by the adapter.
 func executeVectorSearch(ctx context.Context, deps Deps, physical string, spec bson.M, prefilter bson.M, projection vectorProjectionPlan, timeout time.Duration) ([]bson.M, string, []any, relational.FilterPushdown, error) {
 	path, _ := spec["path"].(string)
 	if path == "" {
@@ -388,6 +392,7 @@ func executeVectorSearch(ctx context.Context, deps Deps, physical string, spec b
 	return docs, query, args, split, nil
 }
 
+// buildVectorSearchSQL is a helper used by the adapter.
 func buildVectorSearchSQL(physical string, selectColumns []string, column, vectorLiteral string, dims, limit int, similarity string, prefilter *relational.Where) string {
 	vectorExpr := fmt.Sprintf("%s::float_vector(%d)", vectorLiteral, dims)
 	simParam := ""
@@ -422,6 +427,7 @@ ORDER BY %s DESC
 LIMIT %d`, selectList, physical, strings.Join(whereParts, " AND "), orderExpr, limit)
 }
 
+// aggregateMaxTime is a helper used by the adapter.
 func aggregateMaxTime(cmd bson.M) time.Duration {
 	raw, ok := cmd["maxTimeMS"]
 	if !ok || raw == nil {
@@ -434,6 +440,7 @@ func aggregateMaxTime(cmd bson.M) time.Duration {
 	return time.Duration(n) * time.Millisecond
 }
 
+// withOptionalTimeout is a helper used by the adapter.
 func withOptionalTimeout(ctx context.Context, timeout time.Duration) (context.Context, context.CancelFunc) {
 	if timeout <= 0 {
 		return context.WithCancel(ctx)
@@ -441,6 +448,7 @@ func withOptionalTimeout(ctx context.Context, timeout time.Duration) (context.Co
 	return context.WithTimeout(ctx, timeout)
 }
 
+// refreshVectorSearchTable is a helper used by the adapter.
 func refreshVectorSearchTable(ctx context.Context, deps Deps, physical string) error {
 	if deps.DB == nil || physical == "" {
 		return nil
@@ -453,6 +461,7 @@ func refreshVectorSearchTable(ctx context.Context, deps Deps, physical string) e
 	return err
 }
 
+// buildVectorProjectionPlan is a helper used by the adapter.
 func buildVectorProjectionPlan(stages []bson.M) vectorProjectionPlan {
 	plan := vectorProjectionPlan{
 		SelectColumns: []string{"id", vectorScoreAliasPrefix + vectorSearchScoreField},
@@ -503,10 +512,12 @@ func buildVectorProjectionPlan(stages []bson.M) vectorProjectionPlan {
 	}
 }
 
+// quoteIdentifier is a helper used by the adapter.
 func quoteIdentifier(name string) string {
 	return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
 }
 
+// applyGraphLookupPushdown is a helper used by the adapter.
 func applyGraphLookupPushdown(ctx context.Context, deps Deps, dbName string, baseDocs []bson.M, spec bson.M, timeout time.Duration) ([]bson.M, bool, error) {
 	from, _ := spec["from"].(string)
 	as, _ := spec["as"].(string)
@@ -597,6 +608,7 @@ type graphLookupHit struct {
 	Depth  int64
 }
 
+// queryGraphLookupHits is a helper used by the adapter.
 func queryGraphLookupHits(ctx context.Context, deps Deps, physical string, cfg graphLookupConfig, starts []any, maxDepth int) ([]graphLookupHit, error) {
 	if len(starts) == 0 {
 		return []graphLookupHit{}, nil
@@ -657,6 +669,7 @@ func queryGraphLookupHits(ctx context.Context, deps Deps, physical string, cfg g
 	return hits, nil
 }
 
+// loadGraphLookupDocs is a helper used by the adapter.
 func loadGraphLookupDocs(ctx context.Context, deps Deps, physical string, cfg graphLookupConfig, toExpr string, hits []graphLookupHit, depthField string, restrictWhere *relational.Where) ([]bson.M, error) {
 	if len(hits) == 0 {
 		return []bson.M{}, nil
@@ -694,6 +707,7 @@ func loadGraphLookupDocs(ctx context.Context, deps Deps, physical string, cfg gr
 	return out, nil
 }
 
+// graphLookupStartValues is a helper used by the adapter.
 func graphLookupStartValues(doc bson.M, expr any, connectToField string) ([]any, bool, error) {
 	values := []any{}
 	appendValue := func(v any) error {
@@ -749,6 +763,7 @@ func graphLookupStartValues(doc bson.M, expr any, connectToField string) ([]any,
 	}
 }
 
+// encodeGraphLookupID is a helper used by the adapter.
 func encodeGraphLookupID(v any) (string, error) {
 	if v == nil {
 		return "", fmt.Errorf("_id is nil")
@@ -760,6 +775,7 @@ func encodeGraphLookupID(v any) (string, error) {
 	return string(b), nil
 }
 
+// graphLookupSQLExpr is a helper used by the adapter.
 func graphLookupSQLExpr(path string) (string, bool) {
 	if path == "" {
 		return "", false
@@ -792,6 +808,7 @@ type graphLookupConfig struct {
 	ConnectToField string
 }
 
+// buildGraphLookupConfig is a helper used by the adapter.
 func buildGraphLookupConfig(physical, connectFromField, connectToField string) (graphLookupConfig, bool) {
 	vertexKeyCol, ok := graphVertexKeyColumn(connectToField)
 	if !ok {
@@ -810,6 +827,7 @@ func buildGraphLookupConfig(physical, connectFromField, connectToField string) (
 	}, true
 }
 
+// graphVertexKeyColumn is a helper used by the adapter.
 func graphVertexKeyColumn(path string) (string, bool) {
 	if path == "_id" {
 		return "id", true
@@ -824,6 +842,7 @@ func graphVertexKeyColumn(path string) (string, bool) {
 	return col, true
 }
 
+// encodeGraphNamePart is a helper used by the adapter.
 func encodeGraphNamePart(part string) string {
 	if part == "" {
 		return "x"
@@ -831,6 +850,7 @@ func encodeGraphNamePart(part string) string {
 	return strings.ToLower(shared.FieldB32.EncodeToString([]byte(part)))
 }
 
+// ensureGraphLookupResources is a helper used by the adapter.
 func ensureGraphLookupResources(ctx context.Context, deps Deps, physical string, cfg graphLookupConfig, fromExpr, toExpr string) error {
 	db := deps.DB()
 	if db == nil {
@@ -856,6 +876,7 @@ func ensureGraphLookupResources(ctx context.Context, deps Deps, physical string,
 	return nil
 }
 
+// isIgnorableGraphDDL is a helper used by the adapter.
 func isIgnorableGraphDDL(err error) bool {
 	if err == nil {
 		return false
@@ -866,6 +887,7 @@ func isIgnorableGraphDDL(err error) bool {
 		strings.Contains(msg, "exists")
 }
 
+// buildGraphTraverseSQL is a helper used by the adapter.
 func buildGraphTraverseSQL(graphName string, start any, maxDepth int) string {
 	depth := maxDepth
 	if depth < 0 {
@@ -874,6 +896,7 @@ func buildGraphTraverseSQL(graphName string, start any, maxDepth int) string {
 	return fmt.Sprintf("SELECT * FROM traverse('%s', %s, %d) ORDER BY 2, 1", graphName, graphSQLLiteral(start), depth)
 }
 
+// graphSQLLiteral is a helper used by the adapter.
 func graphSQLLiteral(v any) string {
 	if v == nil {
 		return "NULL"
@@ -882,6 +905,7 @@ func graphSQLLiteral(v any) string {
 	return "'" + strings.ReplaceAll(s, "'", "''") + "'"
 }
 
+// buildLoadDocsByIDSQL is a helper used by the adapter.
 func buildLoadDocsByIDSQL(physical, selectList string, n int) string {
 	placeholders := make([]string, 0, n)
 	for i := 1; i <= n; i++ {
@@ -893,6 +917,7 @@ func buildLoadDocsByIDSQL(physical, selectList string, n int) string {
 	return fmt.Sprintf("SELECT %s FROM doc.%s WHERE id IN (%s)", selectList, physical, strings.Join(placeholders, ", "))
 }
 
+// buildLoadDocsByGraphKeySQL is a helper used by the adapter.
 func buildLoadDocsByGraphKeySQL(physical, selectList, toExpr string, n int, restrictWhere *relational.Where) (string, []any) {
 	placeholders := make([]string, 0, n)
 	for i := 1; i <= n; i++ {
@@ -909,6 +934,7 @@ func buildLoadDocsByGraphKeySQL(physical, selectList, toExpr string, n int, rest
 	return query, nil
 }
 
+// explicitSelectColumns is a helper used by the adapter.
 func explicitSelectColumns(ctx context.Context, deps Deps, physical string) string {
 	if deps.ListCollectionColumns == nil {
 		return "*"
@@ -924,6 +950,7 @@ func explicitSelectColumns(ctx context.Context, deps Deps, physical string) stri
 	return strings.Join(ordered, ", ")
 }
 
+// orderSelectColumns is a helper used by the adapter.
 func orderSelectColumns(cols []string) []string {
 	out := make([]string, 0, len(cols))
 	seen := map[string]struct{}{}
@@ -949,6 +976,7 @@ func orderSelectColumns(cols []string) []string {
 	return out
 }
 
+// rewriteSelectStarQuery is a helper used by the adapter.
 func rewriteSelectStarQuery(ctx context.Context, deps Deps, physical, query string) string {
 	prefix := "SELECT * FROM doc." + physical
 	if !strings.HasPrefix(query, prefix) {
@@ -961,6 +989,7 @@ func rewriteSelectStarQuery(ctx context.Context, deps Deps, physical, query stri
 	return "SELECT " + selectList + strings.TrimPrefix(query, "SELECT *")
 }
 
+// graphLookupDocKey is a helper used by the adapter.
 func graphLookupDocKey(doc bson.M, connectToField string) string {
 	if connectToField == "_id" {
 		encoded, err := encodeGraphLookupID(doc["_id"])
@@ -971,6 +1000,7 @@ func graphLookupDocKey(doc bson.M, connectToField string) string {
 	return fmt.Sprint(mpipeline.GetPathValue(doc, connectToField))
 }
 
+// rebindWhereSQL is a helper used by the adapter.
 func rebindWhereSQL(sql string, offset int) string {
 	if offset <= 0 {
 		return sql
@@ -999,6 +1029,7 @@ func rebindWhereSQL(sql string, offset int) string {
 	return out.String()
 }
 
+// parseVectorLimit is a helper used by the adapter.
 func parseVectorLimit(raw interface{}) (int, error) {
 	if raw == nil {
 		return 0, nil
@@ -1027,6 +1058,7 @@ type aggregatePrefilterPlan struct {
 	NonPushedFilters  []string
 }
 
+// buildAggregatePrefilterPlan is a helper used by the adapter.
 func buildAggregatePrefilterPlan(physical string, pipeline []bson.M) (aggregatePrefilterPlan, bool, error) {
 	if physical == "" || len(pipeline) == 0 {
 		return aggregatePrefilterPlan{}, false, nil
@@ -1134,6 +1166,7 @@ func buildAggregatePrefilterPlan(physical string, pipeline []bson.M) (aggregateP
 	}, true, nil
 }
 
+// sortedFilterKeys is a helper used by the adapter.
 func sortedFilterKeys(filter bson.M) []string {
 	if len(filter) == 0 {
 		return nil
@@ -1146,6 +1179,7 @@ func sortedFilterKeys(filter bson.M) []string {
 	return keys
 }
 
+// cloneWhereArgs is a helper used by the adapter.
 func cloneWhereArgs(where *relational.Where) []any {
 	if where == nil || len(where.Args) == 0 {
 		return nil

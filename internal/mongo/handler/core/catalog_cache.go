@@ -17,6 +17,7 @@ type catalogCache struct {
 
 var globalCatalogCache = &catalogCache{seen: map[string]struct{}{}}
 
+// key is a helper used by the adapter.
 func (c *catalogCache) key(dbName, coll string) string {
 	if dbName == "" || coll == "" {
 		return ""
@@ -24,6 +25,7 @@ func (c *catalogCache) key(dbName, coll string) string {
 	return dbName + "__" + coll
 }
 
+// has is a helper used by the adapter.
 func (c *catalogCache) has(dbName, coll string) bool {
 	if c == nil {
 		return false
@@ -38,6 +40,7 @@ func (c *catalogCache) has(dbName, coll string) bool {
 	return ok
 }
 
+// add is a helper used by the adapter.
 func (c *catalogCache) add(dbName, coll string) {
 	if c == nil {
 		return
@@ -54,6 +57,7 @@ func (c *catalogCache) add(dbName, coll string) {
 	c.mu.Unlock()
 }
 
+// remove is a helper used by the adapter.
 func (c *catalogCache) remove(dbName, coll string) {
 	if c == nil {
 		return
@@ -67,6 +71,7 @@ func (c *catalogCache) remove(dbName, coll string) {
 	c.mu.Unlock()
 }
 
+// clearDB is a helper used by the adapter.
 func (c *catalogCache) clearDB(dbName string) {
 	if c == nil || dbName == "" {
 		return
@@ -81,6 +86,7 @@ func (c *catalogCache) clearDB(dbName string) {
 	c.mu.Unlock()
 }
 
+// clearAll is a helper used by the adapter.
 func (c *catalogCache) clearAll() {
 	if c == nil {
 		return
@@ -90,6 +96,7 @@ func (c *catalogCache) clearAll() {
 	c.mu.Unlock()
 }
 
+// listDBs is a helper used by the adapter.
 func (c *catalogCache) listDBs() []string {
 	if c == nil {
 		return nil
@@ -114,6 +121,7 @@ func (c *catalogCache) listDBs() []string {
 	return out
 }
 
+// listCollections is a helper used by the adapter.
 func (c *catalogCache) listCollections(dbName string) []string {
 	if c == nil || dbName == "" {
 		return nil

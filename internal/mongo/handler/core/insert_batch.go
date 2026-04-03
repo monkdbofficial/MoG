@@ -19,6 +19,7 @@ type insertPreparedDoc struct {
 	docID string
 }
 
+// insertMany is a helper used by the adapter.
 func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []interface{}) (seen int, inserted int64, err error) {
 	if h.pool == nil {
 		return 0, 0, fmt.Errorf("database pool is not configured")

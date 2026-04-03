@@ -19,6 +19,7 @@ import (
 	"mog/internal/version"
 )
 
+// main is the program entrypoint.
 func main() {
 	var showVersion bool
 	flag.BoolVar(&showVersion, "version", false, "print version/build info and exit")
@@ -73,6 +74,7 @@ func main() {
 	logging.Logger().Info("shutting down MoG")
 }
 
+// renderStartupScreen is a helper used by the adapter.
 func renderStartupScreen(cfg *config.Config) {
 	const width = 72
 	const labelWidth = 20
@@ -149,6 +151,7 @@ func renderStartupScreen(cfg *config.Config) {
 	fmt.Print("\n\n")
 }
 
+// formatCell is a helper used by the adapter.
 func formatCell(text string, width int) string {
 	if len(text) > width {
 		if width > 3 {

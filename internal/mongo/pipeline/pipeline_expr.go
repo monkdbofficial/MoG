@@ -19,6 +19,7 @@ type evalOpts struct {
 	vars             map[string]interface{}
 }
 
+// stageVars is a helper used by the adapter.
 func stageVars(doc bson.M, vars map[string]interface{}) map[string]interface{} {
 	out := cloneVars(vars)
 	out["ROOT"] = doc
@@ -26,6 +27,7 @@ func stageVars(doc bson.M, vars map[string]interface{}) map[string]interface{} {
 	return out
 }
 
+// evalComputedWithOpts is a helper used by the adapter.
 func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interface{}, error) {
 	// Field reference: "$field.subfield"
 	if s, ok := expr.(string); ok {
@@ -2038,6 +2040,7 @@ func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interfac
 	return expr, nil
 }
 
+// evalArrayArgs is a helper used by the adapter.
 func evalArrayArgs(doc bson.M, raw interface{}, min int, opts evalOpts) ([]interface{}, error) {
 	arr, ok := coerceInterfaceSlice(raw)
 	if !ok || len(arr) < min {
@@ -2054,6 +2057,7 @@ func evalArrayArgs(doc bson.M, raw interface{}, min int, opts evalOpts) ([]inter
 	return out, nil
 }
 
+// evalCompareOp is a helper used by the adapter.
 func evalCompareOp(doc bson.M, raw interface{}, pred func(int) bool, opts evalOpts) (bool, error) {
 	args, err := evalArrayArgs(doc, raw, 2, opts)
 	if err != nil {
@@ -2062,6 +2066,7 @@ func evalCompareOp(doc bson.M, raw interface{}, pred func(int) bool, opts evalOp
 	return pred(cmp3(args[0], args[1])), nil
 }
 
+// cmp3 is a helper used by the adapter.
 func cmp3(a, b interface{}) int {
 	if af, ok := toFloat64(a); ok {
 		if bf, ok := toFloat64(b); ok {
@@ -2085,6 +2090,7 @@ func cmp3(a, b interface{}) int {
 	return 0
 }
 
+// toInt64IfIntegralMust is a helper used by the adapter.
 func toInt64IfIntegralMust(v interface{}, err error) (int64, bool) {
 	if err != nil {
 		return 0, false
@@ -2092,6 +2098,7 @@ func toInt64IfIntegralMust(v interface{}, err error) (int64, bool) {
 	return toInt64IfIntegral(v)
 }
 
+// datePart is a helper used by the adapter.
 func datePart(doc bson.M, raw interface{}, fn func(time.Time) int64, opts evalOpts) (interface{}, error) {
 	v, err := evalComputedWithOpts(doc, raw, opts)
 	if err != nil {
@@ -2104,6 +2111,7 @@ func datePart(doc bson.M, raw interface{}, fn func(time.Time) int64, opts evalOp
 	return fn(tm.UTC()), nil
 }
 
+// mongoWeek is a helper used by the adapter.
 func mongoWeek(t time.Time) int {
 	t = t.UTC()
 	year := t.Year()
@@ -2118,6 +2126,7 @@ func mongoWeek(t time.Time) int {
 	return 1 + (days / 7)
 }
 
+// dateDiffMonths is a helper used by the adapter.
 func dateDiffMonths(start, end time.Time) int64 {
 	start = start.UTC()
 	end = end.UTC()
@@ -2139,6 +2148,7 @@ func dateDiffMonths(start, end time.Time) int64 {
 	return int64(months) * sign
 }
 
+// dateDiffYears is a helper used by the adapter.
 func dateDiffYears(start, end time.Time) int64 {
 	start = start.UTC()
 	end = end.UTC()
@@ -2157,6 +2167,7 @@ func dateDiffYears(start, end time.Time) int64 {
 	return int64(years) * sign
 }
 
+// cloneVars is a helper used by the adapter.
 func cloneVars(in map[string]interface{}) map[string]interface{} {
 	if in == nil {
 		return map[string]interface{}{}
@@ -2168,6 +2179,7 @@ func cloneVars(in map[string]interface{}) map[string]interface{} {
 	return out
 }
 
+// getPathValueAny is a helper used by the adapter.
 func getPathValueAny(root interface{}, path string) interface{} {
 	if path == "" {
 		return root
@@ -2187,6 +2199,7 @@ func getPathValueAny(root interface{}, path string) interface{} {
 	return cur
 }
 
+// bytesIndex is a helper used by the adapter.
 func bytesIndex(b, sub []byte) int {
 	// tiny helper to avoid importing bytes just for Index
 	if len(sub) == 0 {
@@ -2200,6 +2213,7 @@ func bytesIndex(b, sub []byte) int {
 	return -1
 }
 
+// coerceRegex is a helper used by the adapter.
 func coerceRegex(raw interface{}, rawOptions interface{}) (pattern string, options string, err error) {
 	switch t := raw.(type) {
 	case string:
@@ -2227,6 +2241,7 @@ func coerceRegex(raw interface{}, rawOptions interface{}) (pattern string, optio
 	return pattern, options, nil
 }
 
+// applyRegexOptions is a helper used by the adapter.
 func applyRegexOptions(pattern string, options string) string {
 	// Support a small subset of Mongo options.
 	prefix := ""
@@ -2242,6 +2257,7 @@ func applyRegexOptions(pattern string, options string) string {
 	return prefix + pattern
 }
 
+// mongoDateFormatToGo is a helper used by the adapter.
 func mongoDateFormatToGo(fmtStr string) (string, error) {
 	// Minimal token mapping. Unsupported tokens return an error.
 	out := fmtStr
@@ -2264,6 +2280,7 @@ func mongoDateFormatToGo(fmtStr string) (string, error) {
 	return out, nil
 }
 
+// dateAdd is a helper used by the adapter.
 func dateAdd(t time.Time, unit string, amount int64) time.Time {
 	t = t.UTC()
 	switch strings.ToLower(unit) {
@@ -2288,6 +2305,7 @@ func dateAdd(t time.Time, unit string, amount int64) time.Time {
 	}
 }
 
+// dateTrunc is a helper used by the adapter.
 func dateTrunc(t time.Time, unit string, binSize int64, startOfWeek string) time.Time {
 	t = t.UTC()
 	if binSize <= 0 {
@@ -2334,6 +2352,7 @@ func dateTrunc(t time.Time, unit string, binSize int64, startOfWeek string) time
 	}
 }
 
+// coerceTime is a helper used by the adapter.
 func coerceTime(v interface{}) (time.Time, bool) {
 	if v == nil {
 		return time.Time{}, false
@@ -2383,6 +2402,7 @@ func coerceTime(v interface{}) (time.Time, bool) {
 	}
 }
 
+// coerceExplicitTime is a helper used by the adapter.
 func coerceExplicitTime(v interface{}) (time.Time, bool) {
 	if v == nil {
 		return time.Time{}, false

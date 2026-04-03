@@ -25,10 +25,12 @@ func applyPipeline(docs []bson.M, pipeline []bson.M) ([]bson.M, error) {
 	return applyPipelineWithLookup(docs, pipeline, nil)
 }
 
+// applyPipelineWithLookup is a helper used by the adapter.
 func applyPipelineWithLookup(docs []bson.M, pipeline []bson.M, resolve lookupResolver) ([]bson.M, error) {
 	return applyPipelineWithLookupVars(docs, pipeline, resolve, nil)
 }
 
+// applyPipelineWithLookupVars is a helper used by the adapter.
 func applyPipelineWithLookupVars(docs []bson.M, pipeline []bson.M, resolve lookupResolver, vars map[string]interface{}) ([]bson.M, error) {
 	out := docs
 	for _, stage := range pipeline {

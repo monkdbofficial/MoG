@@ -8,7 +8,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// $bucketAuto stage implementation (subset).
+// applyBucketAuto evaluates a $bucketAuto stage (subset).
 //
 // This implementation focuses on:
 // - groupBy: any expression that evaluates to a sortable scalar (nil, numbers, strings, bool, time)
@@ -91,6 +91,7 @@ func applyBucketAuto(docs []bson.M, spec bson.M) ([]bson.M, error) {
 	return out, nil
 }
 
+// bucketAutoLess is a helper used by the adapter.
 func bucketAutoLess(a, b interface{}) bool {
 	ra := bucketAutoTypeRank(a)
 	rb := bucketAutoTypeRank(b)
@@ -133,6 +134,7 @@ func bucketAutoLess(a, b interface{}) bool {
 	return fmt.Sprint(a) < fmt.Sprint(b)
 }
 
+// bucketAutoTypeRank is a helper used by the adapter.
 func bucketAutoTypeRank(v interface{}) int {
 	// Very small subset of BSON comparison order: null < numbers < strings < bool < date < other
 	if v == nil {
@@ -152,4 +154,3 @@ func bucketAutoTypeRank(v interface{}) int {
 	}
 	return 5
 }
-

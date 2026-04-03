@@ -77,6 +77,7 @@ func NewHandler(pool *pgxpool.Pool, t *translator.Translator, scram *ScramSha256
 	}
 }
 
+// envString is a helper used by the adapter.
 func envString(key, def string) string {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
@@ -85,6 +86,7 @@ func envString(key, def string) string {
 	return v
 }
 
+// envInt is a helper used by the adapter.
 func envInt(key string, def int) int {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
@@ -96,6 +98,7 @@ func envInt(key string, def int) int {
 	return def
 }
 
+// envBool is a helper used by the adapter.
 func envBool(key string, def bool) bool {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
@@ -111,14 +114,17 @@ func envBool(key string, def bool) bool {
 	}
 }
 
+// blobEnabled is a helper used by the adapter.
 func (h *Handler) blobEnabled() bool {
 	return strings.TrimSpace(h.blobTable) != ""
 }
 
+// httpTimeout is a helper used by the adapter.
 func (h *Handler) httpTimeout() time.Duration {
 	return 30 * time.Second
 }
 
+// db is a helper used by the adapter.
 func (h *Handler) db() DBExecutor {
 	if h.tx != nil {
 		return h.tx
@@ -126,6 +132,7 @@ func (h *Handler) db() DBExecutor {
 	return h.pool
 }
 
+// markTouched is a helper used by the adapter.
 func (h *Handler) markTouched(physical string) {
 	if physical == "" {
 		return
@@ -136,6 +143,7 @@ func (h *Handler) markTouched(physical string) {
 	h.touched[physical] = struct{}{}
 }
 
+// refreshTouched is a helper used by the adapter.
 func (h *Handler) refreshTouched(ctx context.Context) {
 	if h.pool == nil || h.tx != nil || len(h.touched) == 0 {
 		return
@@ -147,6 +155,7 @@ func (h *Handler) refreshTouched(ctx context.Context) {
 	h.touched = map[string]struct{}{}
 }
 
+// refreshCollection is a helper used by the adapter.
 func (h *Handler) refreshCollection(ctx context.Context, physical string) {
 	if h.pool == nil || physical == "" {
 		return

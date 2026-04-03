@@ -8,6 +8,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// TestOpMsgDocumentSequenceRoundTrip runs the corresponding test case.
 func TestOpMsgDocumentSequenceRoundTrip(t *testing.T) {
 	bodyDoc, err := bson.Marshal(bson.M{"insert": "c", "$db": "d"})
 	if err != nil {

@@ -6,7 +6,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// $graphLookup stage implementation.
+// applyGraphLookup evaluates a $graphLookup stage.
 func applyGraphLookup(docs []bson.M, spec bson.M, resolve lookupResolver) ([]bson.M, error) {
 	from, _ := spec["from"].(string)
 	as, _ := spec["as"].(string)

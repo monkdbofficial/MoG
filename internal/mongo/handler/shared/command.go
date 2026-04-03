@@ -6,6 +6,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// PrimaryCommandKey is a helper used by the adapter.
 func PrimaryCommandKey(cmd bson.M) string {
 	// Return the "command name" key for logging purposes.
 	// Skip metadata keys that frequently appear in command documents.
@@ -35,6 +36,7 @@ func PrimaryCommandKey(cmd bson.M) string {
 	return keys[0]
 }
 
+// CommandDB is a helper used by the adapter.
 func CommandDB(cmd bson.M) string {
 	if v, ok := cmd["$db"]; ok {
 		if s, ok := AsString(v); ok {
@@ -44,6 +46,7 @@ func CommandDB(cmd bson.M) string {
 	return ""
 }
 
+// AsString is a helper used by the adapter.
 func AsString(v interface{}) (string, bool) {
 	switch t := v.(type) {
 	case string:

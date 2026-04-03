@@ -27,6 +27,7 @@ type AggregatePrefixPlan struct {
 	ConsumedStages int
 }
 
+// coerceDoc is a helper used by the adapter.
 func coerceDoc(v interface{}) (bson.M, bool) {
 	switch t := v.(type) {
 	case bson.M:
@@ -143,6 +144,7 @@ func (t *Translator) TranslateFindWithOptions(collection string, filter bson.M, 
 	return query, args, nil
 }
 
+// TranslateCount is a helper used by the adapter.
 func (t *Translator) TranslateCount(collection string, filter bson.M) (string, []interface{}, error) {
 	table := tableName(collection)
 	if len(filter) == 0 {
@@ -158,6 +160,7 @@ func (t *Translator) TranslateCount(collection string, filter bson.M) (string, [
 	return query, args, nil
 }
 
+// translateFilter is a helper used by the adapter.
 func (t *Translator) translateFilter(filter bson.M) (string, []interface{}, error) {
 	var conditions []string
 	var args []interface{}
@@ -175,6 +178,7 @@ func (t *Translator) translateFilter(filter bson.M) (string, []interface{}, erro
 	return strings.Join(conditions, " AND "), args, nil
 }
 
+// translateCondition is a helper used by the adapter.
 func (t *Translator) translateCondition(field string, val interface{}, argCount *int) (string, []interface{}, error) {
 	if !isSafePath(field) {
 		return "", nil, fmt.Errorf("invalid field name: %s", field)
@@ -662,6 +666,7 @@ func (t *Translator) TranslateAggregatePlan(collection string, pipeline []bson.M
 	return &AggregatePlan{SQL: query, Args: args, Fields: outFields}, nil
 }
 
+// isNumericOne is a helper used by the adapter.
 func isNumericOne(v interface{}) bool {
 	switch x := v.(type) {
 	case int:
@@ -962,10 +967,12 @@ done:
 	return &AggregatePrefixPlan{Plan: &AggregatePlan{SQL: query, Args: args, Fields: []string{"data"}}, ConsumedStages: consumed}, nil
 }
 
+// tableName is a helper used by the adapter.
 func tableName(collection string) string {
 	return fmt.Sprintf("doc.%s", collection)
 }
 
+// isSafeIdentifier is a helper used by the adapter.
 func isSafeIdentifier(name string) bool {
 	if name == "" {
 		return false
@@ -982,6 +989,7 @@ func isSafeIdentifier(name string) bool {
 	return true
 }
 
+// isSafePath is a helper used by the adapter.
 func isSafePath(path string) bool {
 	if path == "" {
 		return false
@@ -998,6 +1006,7 @@ func isSafePath(path string) bool {
 	return true
 }
 
+// dataAccessor is a helper used by the adapter.
 func dataAccessor(path string) string {
 	parts := strings.Split(path, ".")
 	acc := "data"
@@ -1007,6 +1016,7 @@ func dataAccessor(path string) string {
 	return acc
 }
 
+// translateFilterWithArgs is a helper used by the adapter.
 func (t *Translator) translateFilterWithArgs(filter bson.M, argCount *int) (string, []interface{}, error) {
 	var conditions []string
 	var args []interface{}

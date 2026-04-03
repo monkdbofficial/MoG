@@ -7,7 +7,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// $lookup stage implementation.
+// applyLookup evaluates a $lookup stage.
 func applyLookup(docs []bson.M, spec bson.M, resolve lookupResolver) ([]bson.M, error) {
 	from, _ := spec["from"].(string)
 	as, _ := spec["as"].(string)
@@ -108,6 +108,7 @@ func applyLookup(docs []bson.M, spec bson.M, resolve lookupResolver) ([]bson.M, 
 	return out, nil
 }
 
+// parsePipelineStages is a helper used by the adapter.
 func parsePipelineStages(raw interface{}) ([]bson.M, error) {
 	arr, ok := coerceInterfaceSlice(raw)
 	if !ok {
@@ -124,6 +125,7 @@ func parsePipelineStages(raw interface{}) ([]bson.M, error) {
 	return out, nil
 }
 
+// lookupValuesEqual is a helper used by the adapter.
 func lookupValuesEqual(a, b interface{}) bool {
 	// Treat missing localField as null (nil). Missing foreignField also becomes nil, so they match.
 	if a == nil && b == nil {

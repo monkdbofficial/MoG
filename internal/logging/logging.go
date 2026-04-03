@@ -111,6 +111,7 @@ type colorfulConsoleEncoder struct {
 	cfg zapcore.EncoderConfig
 }
 
+// newColorfulConsoleEncoder is a helper used by the adapter.
 func newColorfulConsoleEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
 	return &colorfulConsoleEncoder{
 		Encoder: zapcore.NewJSONEncoder(cfg),
@@ -118,6 +119,7 @@ func newColorfulConsoleEncoder(cfg zapcore.EncoderConfig) zapcore.Encoder {
 	}
 }
 
+// Clone is a helper used by the adapter.
 func (e *colorfulConsoleEncoder) Clone() zapcore.Encoder {
 	return &colorfulConsoleEncoder{
 		Encoder: e.Encoder.Clone(),
@@ -125,6 +127,7 @@ func (e *colorfulConsoleEncoder) Clone() zapcore.Encoder {
 	}
 }
 
+// EncodeEntry is a helper used by the adapter.
 func (e *colorfulConsoleEncoder) EncodeEntry(entry zapcore.Entry, fields []zapcore.Field) (*buffer.Buffer, error) {
 	line := buffer.NewPool().Get()
 

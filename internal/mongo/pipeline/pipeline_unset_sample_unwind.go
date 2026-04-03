@@ -10,7 +10,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// Stages that expand or reshape arrays and top-level document fields.
+// parseUnsetStage parses a $unset stage spec into a list of field paths.
 func parseUnsetStage(v interface{}) ([]string, error) {
 	switch t := v.(type) {
 	case string:
@@ -62,6 +62,7 @@ func parseUnsetStage(v interface{}) ([]string, error) {
 	}
 }
 
+// applyUnsetStage is a helper used by the adapter.
 func applyUnsetStage(docs []bson.M, paths []string) []bson.M {
 	if len(paths) == 0 {
 		return docs
@@ -77,6 +78,7 @@ func applyUnsetStage(docs []bson.M, paths []string) []bson.M {
 	return out
 }
 
+// parseSampleSize is a helper used by the adapter.
 func parseSampleSize(spec bson.M) (int, error) {
 	raw, ok := spec["size"]
 	if !ok {
@@ -92,6 +94,7 @@ func parseSampleSize(spec bson.M) (int, error) {
 	return n, nil
 }
 
+// applySample is a helper used by the adapter.
 func applySample(docs []bson.M, size int) []bson.M {
 	if size <= 0 || len(docs) == 0 {
 		return nil
@@ -129,6 +132,7 @@ func applySample(docs []bson.M, size int) []bson.M {
 	return out
 }
 
+// parseUnwindStage is a helper used by the adapter.
 func parseUnwindStage(v interface{}) (path string, preserve bool, err error) {
 	switch t := v.(type) {
 	case string:
@@ -155,6 +159,7 @@ func parseUnwindStage(v interface{}) (path string, preserve bool, err error) {
 	return path, preserve, nil
 }
 
+// applyUnwind is a helper used by the adapter.
 func applyUnwind(docs []bson.M, path string, preserve bool) ([]bson.M, error) {
 	var out []bson.M
 	for _, d := range docs {

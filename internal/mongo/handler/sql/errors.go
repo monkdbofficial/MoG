@@ -7,6 +7,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 )
 
+// IsUndefinedColumn reports whether a condition holds.
 func IsUndefinedColumn(err error) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
@@ -16,6 +17,7 @@ func IsUndefinedColumn(err error) bool {
 	return pgErr.Code == "42703"
 }
 
+// IsUndefinedRelation reports whether a condition holds.
 func IsUndefinedRelation(err error) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
@@ -25,6 +27,7 @@ func IsUndefinedRelation(err error) bool {
 	return pgErr.Code == "42P01"
 }
 
+// IsUndefinedSchema reports whether a condition holds.
 func IsUndefinedSchema(err error) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
@@ -34,6 +37,7 @@ func IsUndefinedSchema(err error) bool {
 	return pgErr.Code == "3F000"
 }
 
+// IsDuplicateColumn reports whether a condition holds.
 func IsDuplicateColumn(err error) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
@@ -43,6 +47,7 @@ func IsDuplicateColumn(err error) bool {
 	return pgErr.Code == "42701"
 }
 
+// IsDuplicateObject reports whether a condition holds.
 func IsDuplicateObject(err error) bool {
 	var pgErr *pgconn.PgError
 	if !errors.As(err, &pgErr) {
@@ -52,6 +57,7 @@ func IsDuplicateObject(err error) bool {
 	return pgErr.Code == "42710" || pgErr.Code == "42P07"
 }
 
+// IsUniqueViolation reports whether a condition holds.
 func IsUniqueViolation(err error) bool {
 	var pgErr *pgconn.PgError
 	if errors.As(err, &pgErr) {
@@ -69,6 +75,7 @@ func IsUniqueViolation(err error) bool {
 	return strings.Contains(msg, "duplicate key") || strings.Contains(msg, "unique constraint") || strings.Contains(msg, "unique violation")
 }
 
+// IsDuplicateColumnName reports whether a condition holds.
 func IsDuplicateColumnName(err error) bool {
 	errStr := ""
 	if pgErr, ok := err.(*pgconn.PgError); ok {

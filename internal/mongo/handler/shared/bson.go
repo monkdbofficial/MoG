@@ -9,6 +9,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// MarshalObject is a helper used by the adapter.
 func MarshalObject(v interface{}) (string, error) {
 	v = prepareForObjectPayload(v)
 	// Prefer the standard library JSON encoder to avoid Extended JSON wrappers like:
@@ -28,6 +29,7 @@ func MarshalObject(v interface{}) (string, error) {
 	return string(b), nil
 }
 
+// prepareForObjectPayload is a helper used by the adapter.
 func prepareForObjectPayload(v interface{}) interface{} {
 	switch t := v.(type) {
 	case nil:
@@ -127,6 +129,7 @@ func OrderTopLevelDocForReply(m bson.M, preferred []string) bson.D {
 	return out
 }
 
+// CoerceBsonM is a helper used by the adapter.
 func CoerceBsonM(v interface{}) (bson.M, bool) {
 	switch t := v.(type) {
 	case bson.M:

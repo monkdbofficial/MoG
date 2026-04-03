@@ -17,7 +17,7 @@ import (
 	mwire "mog/internal/mongo/wire"
 )
 
-// MongoDB wire-protocol dispatch and command handling.
+// Handle dispatches a single MongoDB wire-protocol operation and always returns a reply on error.
 func (h *Handler) Handle(ctx context.Context, header mwire.MsgHeader, body []byte) ([]byte, error) {
 	var response []byte
 	var err error
@@ -45,6 +45,7 @@ func (h *Handler) Handle(ctx context.Context, header mwire.MsgHeader, body []byt
 	}
 }
 
+// handleMsg is a helper used by the adapter.
 func (h *Handler) handleMsg(ctx context.Context, header mwire.MsgHeader, body []byte) ([]byte, error) {
 	op, err := mwire.ParseOpMsg(header, body)
 	if err != nil {
@@ -87,6 +88,7 @@ func (h *Handler) handleMsg(ctx context.Context, header mwire.MsgHeader, body []
 	return h.handleOpMsgCommand(ctx, op, cmd)
 }
 
+// handleQuery is a helper used by the adapter.
 func (h *Handler) handleQuery(ctx context.Context, header mwire.MsgHeader, body []byte) ([]byte, error) {
 	start := time.Now()
 	op, err := mwire.ParseOpQuery(header, body)
@@ -263,6 +265,7 @@ func (h *Handler) handleQuery(ctx context.Context, header mwire.MsgHeader, body 
 	return h.newReplyError(op.Header.RequestID, 59, "CommandNotFound", fmt.Sprintf("unsupported command in OpQuery: %v", cmd))
 }
 
+// handleOpMsgCommand is a helper used by the adapter.
 func (h *Handler) handleOpMsgCommand(ctx context.Context, op *mwire.OpMsg, cmd bson.M) ([]byte, error) {
 	start := time.Now()
 	cmdName := shared.PrimaryCommandKey(cmd)

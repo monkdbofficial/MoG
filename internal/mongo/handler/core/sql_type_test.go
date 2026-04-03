@@ -7,24 +7,28 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// TestSQLTypeForValue_ArrayIsNotObjectColumn runs the corresponding test case.
 func TestSQLTypeForValue_ArrayIsNotObjectColumn(t *testing.T) {
 	if got := sqlTypeForValue([]interface{}{"a", "b"}); got != "ARRAY(TEXT)" {
 		t.Fatalf("expected array to be stored as ARRAY(TEXT), got %q", got)
 	}
 }
 
+// TestSQLTypeForValue_FloatVector runs the corresponding test case.
 func TestSQLTypeForValue_FloatVector(t *testing.T) {
 	if got := sqlTypeForValue([]interface{}{1, 2, 3}); got != "ARRAY(LONG)" {
 		t.Fatalf("expected ARRAY(LONG), got %q", got)
 	}
 }
 
+// TestSQLTypeForValue_Object runs the corresponding test case.
 func TestSQLTypeForValue_Object(t *testing.T) {
 	if got := sqlTypeForValue(bson.M{"a": 1}); got != "OBJECT(DYNAMIC)" {
 		t.Fatalf("expected OBJECT(DYNAMIC), got %q", got)
 	}
 }
 
+// TestSQLTypeForValue_NumericAndTimeTypes runs the corresponding test case.
 func TestSQLTypeForValue_NumericAndTimeTypes(t *testing.T) {
 	if got := sqlTypeForValue(int32(1)); got != "INTEGER" {
 		t.Fatalf("expected INTEGER, got %q", got)
@@ -43,6 +47,7 @@ func TestSQLTypeForValue_NumericAndTimeTypes(t *testing.T) {
 	}
 }
 
+// TestSQLTypeForValue_ObjectID runs the corresponding test case.
 func TestSQLTypeForValue_ObjectID(t *testing.T) {
 	if got := sqlTypeForValue(bson.NewObjectId()); got != "TEXT" {
 		t.Fatalf("expected TEXT, got %q", got)

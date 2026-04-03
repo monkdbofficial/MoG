@@ -2,6 +2,7 @@ package mongo
 
 import "testing"
 
+// TestCatalogCache_ListCollections_FiltersInternal runs the corresponding test case.
 func TestCatalogCache_ListCollections_FiltersInternal(t *testing.T) {
 	c := &catalogCache{seen: map[string]struct{}{}}
 	c.add("testdb", "users")
@@ -13,4 +14,3 @@ func TestCatalogCache_ListCollections_FiltersInternal(t *testing.T) {
 		t.Fatalf("unexpected collections: %#v", got)
 	}
 }
-

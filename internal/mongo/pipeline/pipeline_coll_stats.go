@@ -6,7 +6,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// $collStats stage implementation (placeholder).
+// applyCollStats evaluates a $collStats stage (placeholder).
 //
 // In MongoDB, $collStats returns collection/storage-engine level statistics and
 // does not depend on the input documents. MoG's in-memory pipeline evaluator
@@ -28,8 +28,8 @@ func applyCollStats(spec bson.M) ([]bson.M, error) {
 				return nil, fmt.Errorf("$collStats.latencyStats must be a document")
 			}
 			out["latencyStats"] = bson.M{
-				"reads":  bson.M{"ops": int64(0), "latency": int64(0), "histogram": []interface{}{}},
-				"writes": bson.M{"ops": int64(0), "latency": int64(0), "histogram": []interface{}{}},
+				"reads":    bson.M{"ops": int64(0), "latency": int64(0), "histogram": []interface{}{}},
+				"writes":   bson.M{"ops": int64(0), "latency": int64(0), "histogram": []interface{}{}},
 				"commands": bson.M{"ops": int64(0), "latency": int64(0), "histogram": []interface{}{}},
 			}
 		case "storageStats":
@@ -41,16 +41,16 @@ func applyCollStats(spec bson.M) ([]bson.M, error) {
 				return nil, fmt.Errorf("$collStats.storageStats must be a document")
 			}
 			out["storageStats"] = bson.M{
-				"size":        int64(0),
-				"count":       int64(0),
-				"avgObjSize":  int64(0),
-				"storageSize": int64(0),
+				"size":            int64(0),
+				"count":           int64(0),
+				"avgObjSize":      int64(0),
+				"storageSize":     int64(0),
 				"freeStorageSize": int64(0),
-				"capped":      false,
-				"nindexes":    int64(0),
-				"totalIndexSize": int64(0),
-				"totalSize":      int64(0),
-				"indexSizes":     bson.M{},
+				"capped":          false,
+				"nindexes":        int64(0),
+				"totalIndexSize":  int64(0),
+				"totalSize":       int64(0),
+				"indexSizes":      bson.M{},
 			}
 		default:
 			// Accept unknown options for forward compatibility; ignore.
@@ -59,4 +59,3 @@ func applyCollStats(spec bson.M) ([]bson.M, error) {
 
 	return []bson.M{out}, nil
 }
-

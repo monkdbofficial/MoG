@@ -2,13 +2,14 @@ package mongo
 
 import (
 	"reflect"
-	"testing"
 	"strings"
+	"testing"
 	"time"
 
 	"gopkg.in/mgo.v2/bson"
 )
 
+// TestNormalizeRowValue_JSONBytesArray runs the corresponding test case.
 func TestNormalizeRowValue_JSONBytesArray(t *testing.T) {
 	got := normalizeRowValue([]byte(`["a","b"]`))
 	arr, ok := got.([]interface{})
@@ -20,6 +21,7 @@ func TestNormalizeRowValue_JSONBytesArray(t *testing.T) {
 	}
 }
 
+// TestNormalizeRowValue_JSONBytesObject runs the corresponding test case.
 func TestNormalizeRowValue_JSONBytesObject(t *testing.T) {
 	got := normalizeRowValue([]byte(`{"a":1}`))
 	m, ok := got.(bson.M)
@@ -31,6 +33,7 @@ func TestNormalizeRowValue_JSONBytesObject(t *testing.T) {
 	}
 }
 
+// TestNormalizeDocForReply_RehydratesObjectIDsAndTimestamps runs the corresponding test case.
 func TestNormalizeDocForReply_RehydratesObjectIDsAndTimestamps(t *testing.T) {
 	doc := bson.M{
 		"_id":      "69ca02e4a989bbdeccf98cff",
@@ -73,6 +76,7 @@ func TestNormalizeDocForReply_RehydratesObjectIDsAndTimestamps(t *testing.T) {
 	}
 }
 
+// TestNormalizeDocForReply_ExtJSONNumberLongInBsonM runs the corresponding test case.
 func TestNormalizeDocForReply_ExtJSONNumberLongInBsonM(t *testing.T) {
 	doc := bson.M{
 		"_id": bson.NewObjectId(),
@@ -84,9 +88,10 @@ func TestNormalizeDocForReply_ExtJSONNumberLongInBsonM(t *testing.T) {
 	}
 }
 
+// TestNormalizeDocForStorage_ExtJSONNumberLongInBsonM runs the corresponding test case.
 func TestNormalizeDocForStorage_ExtJSONNumberLongInBsonM(t *testing.T) {
 	doc := bson.M{
-		"_id": bson.NewObjectId(),
+		"_id":           bson.NewObjectId(),
 		"mongo_user_id": bson.M{"$numberLong": "1"},
 	}
 	normalizeDocForStorage(doc)
@@ -95,9 +100,10 @@ func TestNormalizeDocForStorage_ExtJSONNumberLongInBsonM(t *testing.T) {
 	}
 }
 
+// TestNormalizeDocForStorage_ExtJSONNumberLongNumericValue runs the corresponding test case.
 func TestNormalizeDocForStorage_ExtJSONNumberLongNumericValue(t *testing.T) {
 	doc := bson.M{
-		"_id": bson.NewObjectId(),
+		"_id":           bson.NewObjectId(),
 		"mongo_user_id": bson.M{"$numberLong": float64(1)},
 	}
 	normalizeDocForStorage(doc)
@@ -106,11 +112,12 @@ func TestNormalizeDocForStorage_ExtJSONNumberLongNumericValue(t *testing.T) {
 	}
 }
 
+// TestNormalizeDocForStorageAndReply_EscapesDottedAndDollarKeys runs the corresponding test case.
 func TestNormalizeDocForStorageAndReply_EscapesDottedAndDollarKeys(t *testing.T) {
 	doc := bson.M{
 		"_id": bson.NewObjectId(),
 		"weird_keys": bson.M{
-			"dotted.key": "x",
+			"dotted.key":  "x",
 			"dollar$sign": "y",
 		},
 	}
@@ -140,6 +147,7 @@ func TestNormalizeDocForStorageAndReply_EscapesDottedAndDollarKeys(t *testing.T)
 	}
 }
 
+// TestNormalize_MixedArrayIsWrappedForStorageAndUnwrappedForReply runs the corresponding test case.
 func TestNormalize_MixedArrayIsWrappedForStorageAndUnwrappedForReply(t *testing.T) {
 	doc := bson.M{
 		"_id": bson.NewObjectId(),
@@ -175,6 +183,7 @@ func TestNormalize_MixedArrayIsWrappedForStorageAndUnwrappedForReply(t *testing.
 	}
 }
 
+// TestNormalizeDocForStorage_UnsupportedBsonTypesAreMadeSQLSafe runs the corresponding test case.
 func TestNormalizeDocForStorage_UnsupportedBsonTypesAreMadeSQLSafe(t *testing.T) {
 	doc := bson.M{
 		"_id": bson.NewObjectId(),
@@ -204,6 +213,7 @@ func TestNormalizeDocForStorage_UnsupportedBsonTypesAreMadeSQLSafe(t *testing.T)
 	}
 }
 
+// TestNormalizeDocForStorage_BytesRoundTripAsBinary runs the corresponding test case.
 func TestNormalizeDocForStorage_BytesRoundTripAsBinary(t *testing.T) {
 	doc := bson.M{
 		"_id":  bson.NewObjectId(),

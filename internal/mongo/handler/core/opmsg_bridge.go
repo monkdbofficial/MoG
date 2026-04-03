@@ -15,18 +15,22 @@ type opmsgExecAdapter struct {
 	exec opmsg.DBExecutor
 }
 
+// Query is a helper used by the adapter.
 func (a opmsgExecAdapter) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
 	return a.exec.Query(ctx, sql, args...)
 }
 
+// QueryRow is a helper used by the adapter.
 func (a opmsgExecAdapter) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
 	return a.exec.QueryRow(ctx, sql, args...)
 }
 
+// Exec is a helper used by the adapter.
 func (a opmsgExecAdapter) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
 	return a.exec.Exec(ctx, sql, args...)
 }
 
+// opmsgDeps is a helper used by the adapter.
 func (h *Handler) opmsgDeps() opmsg.Deps {
 	return opmsg.Deps{
 		LogWriteInfo: h.logWriteInfo,

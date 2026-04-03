@@ -16,14 +16,23 @@ type fakeRows struct {
 	closed bool
 }
 
+// Close is a helper used by the adapter.
 func (r *fakeRows) Close() { r.closed = true }
+
+// Err is a helper used by the adapter.
 func (r *fakeRows) Err() error {
 	return nil
 }
+
+// CommandTag is a helper used by the adapter.
 func (r *fakeRows) CommandTag() pgconn.CommandTag { return pgconn.CommandTag{} }
+
+// FieldDescriptions is a helper used by the adapter.
 func (r *fakeRows) FieldDescriptions() []pgconn.FieldDescription {
 	return r.fields
 }
+
+// Next is a helper used by the adapter.
 func (r *fakeRows) Next() bool {
 	if r.closed {
 		return false
@@ -35,30 +44,44 @@ func (r *fakeRows) Next() bool {
 	r.i++
 	return true
 }
+
+// Scan is a helper used by the adapter.
 func (r *fakeRows) Scan(dest ...any) error { return nil }
+
+// Values is a helper used by the adapter.
 func (r *fakeRows) Values() ([]any, error) {
 	if r.i == 0 || r.i > len(r.vals) {
 		return nil, nil
 	}
 	return r.vals[r.i-1], nil
 }
+
+// RawValues is a helper used by the adapter.
 func (r *fakeRows) RawValues() [][]byte { return nil }
-func (r *fakeRows) Conn() *pgx.Conn     { return nil }
+
+// Conn is a helper used by the adapter.
+func (r *fakeRows) Conn() *pgx.Conn { return nil }
 
 type fakeExec struct {
 	rows pgx.Rows
 }
 
+// Query is a helper used by the adapter.
 func (e fakeExec) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
 	return e.rows, nil
 }
+
+// QueryRow is a helper used by the adapter.
 func (e fakeExec) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
 	return nil
 }
+
+// Exec is a helper used by the adapter.
 func (e fakeExec) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
 	return pgconn.CommandTag{}, nil
 }
 
+// TestLoadSQLDocsWithIDsQuery_UsesDataColumnEvenWhenStoreRawDisabled runs the corresponding test case.
 func TestLoadSQLDocsWithIDsQuery_UsesDataColumnEvenWhenStoreRawDisabled(t *testing.T) {
 	h := &Handler{storeRawMongoJSON: false}
 

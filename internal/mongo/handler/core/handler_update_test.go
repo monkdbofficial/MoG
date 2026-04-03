@@ -16,6 +16,7 @@ type recordingQueryExec struct {
 	rows      pgx.Rows
 }
 
+// Query is a helper used by the adapter.
 func (e *recordingQueryExec) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
 	e.querySQL = append(e.querySQL, sql)
 	copied := append([]interface{}(nil), args...)
@@ -23,14 +24,17 @@ func (e *recordingQueryExec) Query(ctx context.Context, sql string, args ...inte
 	return e.rows, nil
 }
 
+// QueryRow is a helper used by the adapter.
 func (e *recordingQueryExec) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
 	return nil
 }
 
+// Exec is a helper used by the adapter.
 func (e *recordingQueryExec) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
 	return pgconn.CommandTag{}, errors.New("Exec not implemented")
 }
 
+// TestLoadCandidateSQLDocsWithIDs_UsesCoarseWhereClause runs the corresponding test case.
 func TestLoadCandidateSQLDocsWithIDs_UsesCoarseWhereClause(t *testing.T) {
 	h := &Handler{}
 	exec := &recordingQueryExec{

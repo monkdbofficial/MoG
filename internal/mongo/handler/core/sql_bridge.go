@@ -13,14 +13,18 @@ import (
 	"go.uber.org/zap"
 )
 
+// sqlTypeForValue is a helper used by the adapter.
 func sqlTypeForValue(v interface{}) string { return sql.TypeForValue(v) }
 
+// floatVectorLiteral is a helper used by the adapter.
 func floatVectorLiteral(v interface{}) (string, int, bool) { return sql.FloatVectorLiteral(v) }
 
+// arrayArgForSQLType is a helper used by the adapter.
 func arrayArgForSQLType(v interface{}, sqlType string) (interface{}, error) {
 	return sql.ArrayArgForSQLType(v, sqlType)
 }
 
+// sqlTypeForField is a helper used by the adapter.
 func sqlTypeForField(field string, v interface{}) string {
 	typ := sql.TypeForValue(v)
 	// FLOAT_VECTOR is reserved for "vector-like" fields (e.g. embeddings).
@@ -39,6 +43,7 @@ var (
 	floatVectorSimilarityWarn sync.Once
 )
 
+// floatVectorSimilarityClause is a helper used by the adapter.
 func floatVectorSimilarityClause() string {
 	if sim := floatVectorSimilarityValue(); sim != "" {
 		return fmt.Sprintf(" WITH (similarity = '%s')", sim)
@@ -46,6 +51,7 @@ func floatVectorSimilarityClause() string {
 	return ""
 }
 
+// floatVectorSimilarityValue is a helper used by the adapter.
 func floatVectorSimilarityValue() string {
 	raw := strings.TrimSpace(os.Getenv(floatVectorSimilarityEnv))
 	if raw == "" {
@@ -63,6 +69,7 @@ func floatVectorSimilarityValue() string {
 	return ""
 }
 
+// looksLikeVectorField is a helper used by the adapter.
 func looksLikeVectorField(field string) bool {
 	if field == "" {
 		return false
@@ -74,10 +81,23 @@ func looksLikeVectorField(field string) bool {
 	return false
 }
 
-func isUndefinedColumn(err error) bool     { return sql.IsUndefinedColumn(err) }
-func isUndefinedRelation(err error) bool   { return sql.IsUndefinedRelation(err) }
-func isUndefinedSchema(err error) bool     { return sql.IsUndefinedSchema(err) }
-func isDuplicateColumn(err error) bool     { return sql.IsDuplicateColumn(err) }
-func isDuplicateObject(err error) bool     { return sql.IsDuplicateObject(err) }
-func isUniqueViolation(err error) bool     { return sql.IsUniqueViolation(err) }
+// isUndefinedColumn is a helper used by the adapter.
+func isUndefinedColumn(err error) bool { return sql.IsUndefinedColumn(err) }
+
+// isUndefinedRelation is a helper used by the adapter.
+func isUndefinedRelation(err error) bool { return sql.IsUndefinedRelation(err) }
+
+// isUndefinedSchema is a helper used by the adapter.
+func isUndefinedSchema(err error) bool { return sql.IsUndefinedSchema(err) }
+
+// isDuplicateColumn is a helper used by the adapter.
+func isDuplicateColumn(err error) bool { return sql.IsDuplicateColumn(err) }
+
+// isDuplicateObject is a helper used by the adapter.
+func isDuplicateObject(err error) bool { return sql.IsDuplicateObject(err) }
+
+// isUniqueViolation is a helper used by the adapter.
+func isUniqueViolation(err error) bool { return sql.IsUniqueViolation(err) }
+
+// isDuplicateColumnName is a helper used by the adapter.
 func isDuplicateColumnName(err error) bool { return sql.IsDuplicateColumnName(err) }

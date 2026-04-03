@@ -33,23 +33,27 @@ var (
 	}
 )
 
+// getReader is a helper used by the adapter.
 func getReader(rd io.Reader) *bufio.Reader {
 	r := readerPool.Get().(*bufio.Reader)
 	r.Reset(rd)
 	return r
 }
 
+// putReader is a helper used by the adapter.
 func putReader(r *bufio.Reader) {
 	r.Reset(nil)
 	readerPool.Put(r)
 }
 
+// getWriter is a helper used by the adapter.
 func getWriter(wr io.Writer) *bufio.Writer {
 	w := writerPool.Get().(*bufio.Writer)
 	w.Reset(wr)
 	return w
 }
 
+// putWriter is a helper used by the adapter.
 func putWriter(w *bufio.Writer) {
 	w.Reset(nil)
 	writerPool.Put(w)
@@ -106,6 +110,7 @@ func (s *Server) Close() {
 	s.listener.Close()
 }
 
+// handleConnection is a helper used by the adapter.
 func (s *Server) handleConnection(ctx context.Context, conn net.Conn) {
 	defer conn.Close()
 	remoteAddr := conn.RemoteAddr().String()

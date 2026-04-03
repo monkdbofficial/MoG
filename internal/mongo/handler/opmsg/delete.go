@@ -5,25 +5,39 @@ import (
 	"fmt"
 	"slices"
 	"strings"
+	"time"
 
 	"go.uber.org/zap"
 	"gopkg.in/mgo.v2/bson"
 
 	"mog/internal/logging"
+	mongopath "mog/internal/mongo"
 	"mog/internal/mongo/handler/relational"
 	"mog/internal/mongo/handler/shared"
 	mpipeline "mog/internal/mongo/pipeline"
 )
 
+// CmdDelete is a helper used by the adapter.
 func CmdDelete(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byte, bool, error) {
 	col, ok := cmd["delete"].(string)
 	if !ok {
 		return nil, false, nil
 	}
+	start := time.Now()
 
 	dbName := deps.CommandDB(cmd)
 	physical, err := deps.PhysicalCollectionName(dbName, col)
 	if err != nil {
+		mongopath.LogQuery(mongopath.QueryLogOptions{
+			Stage:         mongopath.RequestStageComplete,
+			Method:        "delete",
+			Operation:     "delete",
+			QueryName:     "delete",
+			Table:         "",
+			Error:         err,
+			TotalDuration: time.Since(start),
+			StartedAt:     start,
+		})
 		resp, rerr := deps.NewMsgError(requestID, 2, "BadValue", err.Error())
 		return resp, true, rerr
 	}
@@ -47,6 +61,16 @@ func CmdDelete(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 		}
 	}
 	if !ok {
+		mongopath.LogQuery(mongopath.QueryLogOptions{
+			Stage:         mongopath.RequestStageComplete,
+			Method:        "delete",
+			Operation:     "delete",
+			QueryName:     "delete",
+			Table:         physical,
+			Error:         fmt.Errorf("deletes must be an array"),
+			TotalDuration: time.Since(start),
+			StartedAt:     start,
+		})
 		return nil, true, fmt.Errorf("deletes must be an array")
 	}
 
@@ -74,6 +98,16 @@ func CmdDelete(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 
 		pdocs, err := loadDeleteCandidateDocs(ctx, deps, physical, filter, limit == 1)
 		if err != nil {
+			mongopath.LogQuery(mongopath.QueryLogOptions{
+				Stage:         mongopath.RequestStageComplete,
+				Method:        "delete",
+				Operation:     "delete",
+				QueryName:     "delete",
+				Table:         physical,
+				Error:         err,
+				TotalDuration: time.Since(start),
+				StartedAt:     start,
+			})
 			return nil, true, err
 		}
 		residualFilter := deleteResidualFilter(filter)
@@ -89,6 +123,16 @@ func CmdDelete(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 		for _, id := range delIDs {
 			tag, err := deps.DB().Exec(ctx, "DELETE FROM doc."+physical+" WHERE id = $1", id)
 			if err != nil {
+				mongopath.LogQuery(mongopath.QueryLogOptions{
+					Stage:         mongopath.RequestStageComplete,
+					Method:        "delete",
+					Operation:     "delete",
+					QueryName:     "delete",
+					Table:         physical,
+					Error:         err,
+					TotalDuration: time.Since(start),
+					StartedAt:     start,
+				})
 				return nil, true, err
 			}
 			affected += tag.RowsAffected()
@@ -121,9 +165,21 @@ func CmdDelete(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 	}
 
 	resp, err := deps.NewMsg(requestID, respDoc)
+	mongopath.LogQuery(mongopath.QueryLogOptions{
+		Stage:         mongopath.RequestStageComplete,
+		Method:        "delete",
+		Operation:     "delete",
+		QueryName:     "delete",
+		Table:         physical,
+		RowsAffected:  affected,
+		Error:         err,
+		TotalDuration: time.Since(start),
+		StartedAt:     start,
+	})
 	return resp, true, err
 }
 
+// loadDeleteCandidateDocs is a helper used by the adapter.
 func loadDeleteCandidateDocs(ctx context.Context, deps Deps, physical string, filter bson.M, single bool) ([]SQLDoc, error) {
 	pushdown, err := relational.BuildFilterPushdown(filter)
 	if err != nil {
@@ -145,6 +201,7 @@ func loadDeleteCandidateDocs(ctx context.Context, deps Deps, physical string, fi
 	return deps.LoadSQLDocsWithIDs(ctx, physical)
 }
 
+// deleteCandidateSelectList is a helper used by the adapter.
 func deleteCandidateSelectList(ctx context.Context, deps Deps, physical string, residual bson.M) string {
 	needed := map[string]struct{}{"id": {}}
 	for _, field := range deleteFilterFieldRoots(residual) {
@@ -168,6 +225,7 @@ func deleteCandidateSelectList(ctx context.Context, deps Deps, physical string, 
 	return strings.Join(out, ", ")
 }
 
+// deleteFilterFieldRoots is a helper used by the adapter.
 func deleteFilterFieldRoots(filter bson.M) []string {
 	roots := map[string]struct{}{}
 	var walk func(bson.M)
@@ -197,6 +255,7 @@ func deleteFilterFieldRoots(filter bson.M) []string {
 	return out
 }
 
+// deleteResidualFilter is a helper used by the adapter.
 func deleteResidualFilter(filter bson.M) bson.M {
 	pushdown, err := relational.BuildFilterPushdown(filter)
 	if err != nil {
@@ -205,6 +264,7 @@ func deleteResidualFilter(filter bson.M) bson.M {
 	return pushdown.ResidualFilter
 }
 
+// orderNeededColumns is a helper used by the adapter.
 func orderNeededColumns(cols []string) []string {
 	available := map[string]struct{}{}
 	for _, col := range cols {

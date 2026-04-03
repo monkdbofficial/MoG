@@ -24,6 +24,7 @@ type FilterPushdown struct {
 	ResidualFilter bson.M
 }
 
+// normalizeIDForStorage is a helper used by the adapter.
 func normalizeIDForStorage(v interface{}) interface{} {
 	// MoG stores ObjectIds as hex strings for SQL compatibility.
 	if oid, ok := v.(bson.ObjectId); ok {
@@ -32,6 +33,7 @@ func normalizeIDForStorage(v interface{}) interface{} {
 	return v
 }
 
+// encodeDocIDArg is a helper used by the adapter.
 func encodeDocIDArg(v interface{}) (string, error) {
 	// Core stores `doc.id` as a JSON-encoded value (most commonly a JSON string literal).
 	// Mirror that here so relational pushdown can match by _id.
@@ -47,6 +49,7 @@ func encodeDocIDArg(v interface{}) (string, error) {
 	return string(b), nil
 }
 
+// BuildWhere builds a derived value.
 func BuildWhere(filter bson.M) (*Where, bool, error) {
 	if len(filter) == 0 {
 		return &Where{SQL: "", Args: nil}, true, nil
@@ -163,6 +166,7 @@ func BuildWhere(filter bson.M) (*Where, bool, error) {
 	return &Where{SQL: strings.Join(parts, " AND "), Args: args}, true, nil
 }
 
+// BuildFilterPushdown builds a derived value.
 func BuildFilterPushdown(filter bson.M) (FilterPushdown, error) {
 	pushdown := FilterPushdown{
 		Where:          &Where{SQL: "", Args: nil},
@@ -206,6 +210,7 @@ func BuildFilterPushdown(filter bson.M) (FilterPushdown, error) {
 	return pushdown, nil
 }
 
+// BuildOrderBy builds a derived value.
 func BuildOrderBy(sortSpec bson.M) (string, bool, error) {
 	if len(sortSpec) == 0 {
 		return "", true, nil
@@ -255,6 +260,7 @@ func BuildOrderBy(sortSpec bson.M) (string, bool, error) {
 	return " ORDER BY " + strings.Join(parts, ", "), true, nil
 }
 
+// relationalAccessor is a helper used by the adapter.
 func relationalAccessor(path string) (string, bool) {
 	if path == "" {
 		return "", false
@@ -286,6 +292,7 @@ func relationalAccessor(path string) (string, bool) {
 	return acc, true
 }
 
+// isSafePushdownCondition is a helper used by the adapter.
 func isSafePushdownCondition(field string, val interface{}) bool {
 	if field == "" || strings.HasPrefix(field, "$") {
 		return false
@@ -315,6 +322,7 @@ func isSafePushdownCondition(field string, val interface{}) bool {
 	return true
 }
 
+// isSafePushdownValue is a helper used by the adapter.
 func isSafePushdownValue(v interface{}) bool {
 	if v == nil {
 		return false
@@ -346,6 +354,7 @@ func isSafePushdownValue(v interface{}) bool {
 	}
 }
 
+// mergeFilters is a helper used by the adapter.
 func mergeFilters(filters ...bson.M) bson.M {
 	out := bson.M{}
 	for _, filter := range filters {

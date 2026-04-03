@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// IsSafeIdentifier reports whether a condition holds.
 func IsSafeIdentifier(name string) bool {
 	if name == "" {
 		return false
@@ -42,6 +43,7 @@ func IsInternalCollectionName(name string) bool {
 
 var FieldB32 = base32.StdEncoding.WithPadding(base32.NoPadding)
 
+// SQLColumnNameForField is a helper used by the adapter.
 func SQLColumnNameForField(field string) string {
 	// NOTE: MongoDB field names can't contain '.' (nested paths are expressed in queries), but they can
 	// start with '_' which conflicts with MonkDB system column patterns. We also reserve a few
@@ -63,6 +65,7 @@ func SQLColumnNameForField(field string) string {
 	return "f_" + enc
 }
 
+// MongoFieldNameForColumn is a helper used by the adapter.
 func MongoFieldNameForColumn(col string) string {
 	if col == "" {
 		return ""

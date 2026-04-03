@@ -9,6 +9,7 @@ import (
 	"mog/internal/mongo/pipeline"
 )
 
+// isFloatLike is a helper used by the adapter.
 func isFloatLike(v interface{}) bool {
 	switch v.(type) {
 	case float32, float64:
@@ -18,6 +19,7 @@ func isFloatLike(v interface{}) bool {
 	}
 }
 
+// int64FromNumber is a helper used by the adapter.
 func int64FromNumber(v interface{}) (int64, bool) {
 	switch x := v.(type) {
 	case int:
@@ -46,6 +48,7 @@ func int64FromNumber(v interface{}) (int64, bool) {
 	}
 }
 
+// castInt64ToLike is a helper used by the adapter.
 func castInt64ToLike(src interface{}, v int64) (interface{}, bool) {
 	switch src.(type) {
 	case int8:
@@ -98,6 +101,7 @@ func castInt64ToLike(src interface{}, v int64) (interface{}, bool) {
 	}
 }
 
+// strconvIntSize is a helper used by the adapter.
 func strconvIntSize() int {
 	// Go doesn't expose int size directly; infer from constant.
 	// This is evaluated at compile time.
@@ -107,6 +111,7 @@ func strconvIntSize() int {
 	return 64
 }
 
+// applySet is a helper used by the adapter.
 func applySet(doc bson.M, spec bson.M) []Warning {
 	var warnings []Warning
 	for path, v := range spec {
@@ -119,6 +124,7 @@ func applySet(doc bson.M, spec bson.M) []Warning {
 	return warnings
 }
 
+// applyUnset is a helper used by the adapter.
 func applyUnset(doc bson.M, spec bson.M) []Warning {
 	var warnings []Warning
 	for path := range spec {
@@ -131,6 +137,7 @@ func applyUnset(doc bson.M, spec bson.M) []Warning {
 	return warnings
 }
 
+// applyInc is a helper used by the adapter.
 func applyInc(doc bson.M, spec bson.M) []Warning {
 	var warnings []Warning
 	for path, rawDelta := range spec {
@@ -204,6 +211,7 @@ func applyInc(doc bson.M, spec bson.M) []Warning {
 	return warnings
 }
 
+// applyPush is a helper used by the adapter.
 func applyPush(doc bson.M, spec bson.M) []Warning {
 	var warnings []Warning
 	for path, v := range spec {
@@ -228,6 +236,7 @@ func applyPush(doc bson.M, spec bson.M) []Warning {
 	return warnings
 }
 
+// applyAddToSet is a helper used by the adapter.
 func applyAddToSet(doc bson.M, spec bson.M) []Warning {
 	var warnings []Warning
 	for path, v := range spec {
