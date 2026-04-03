@@ -430,7 +430,7 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 					continue
 				}
 				coll := strings.TrimPrefix(name, prefix)
-				if coll == "" || coll == catalogCollection || seen[coll] {
+				if coll == "" || coll == catalogCollection || shared.IsInternalCollectionName(coll) || seen[coll] {
 					continue
 				}
 				seen[coll] = true
@@ -453,7 +453,7 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 					continue
 				}
 				coll := strings.TrimPrefix(name, prefix)
-				if coll == "" || coll == catalogCollection {
+				if coll == "" || coll == catalogCollection || shared.IsInternalCollectionName(coll) {
 					continue
 				}
 				existing[coll] = true
@@ -502,6 +502,9 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 			if coll == "" || coll == catalogCollection {
 				continue
 			}
+			if shared.IsInternalCollectionName(coll) {
+				continue
+			}
 			if len(existing) > 0 && !existing[coll] {
 				continue
 			}
@@ -531,6 +534,9 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 					if coll == "" || coll == catalogCollection || seen[coll] {
 						continue
 					}
+					if shared.IsInternalCollectionName(coll) {
+						continue
+					}
 					if len(existing) > 0 && !existing[coll] {
 						continue
 					}
@@ -549,7 +555,7 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 					continue
 				}
 				coll := strings.TrimPrefix(name, prefix)
-				if coll == "" || coll == catalogCollection || seen[coll] {
+				if coll == "" || coll == catalogCollection || shared.IsInternalCollectionName(coll) || seen[coll] {
 					continue
 				}
 				seen[coll] = true
@@ -560,7 +566,7 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 		if len(out) > 0 || attempt == 1 {
 			// Merge in process-local catalog cache (helps when SQL catalog is missing/broken).
 			for _, coll := range globalCatalogCache.listCollections(dbName) {
-				if coll != "" && coll != catalogCollection && !seen[coll] {
+				if coll != "" && coll != catalogCollection && !shared.IsInternalCollectionName(coll) && !seen[coll] {
 					seen[coll] = true
 					out = append(out, coll)
 				}
@@ -612,7 +618,7 @@ func (h *Handler) catalogBackfillFromTables(ctx context.Context) error {
 		}
 		dbName := parts[0]
 		coll := parts[1]
-		if coll == "" || coll == catalogCollection {
+		if coll == "" || coll == catalogCollection || shared.IsInternalCollectionName(coll) {
 			continue
 		}
 		_ = h.catalogUpsert(ctx, dbName, coll)

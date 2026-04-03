@@ -19,6 +19,13 @@ type evalOpts struct {
 	vars             map[string]interface{}
 }
 
+func stageVars(doc bson.M, vars map[string]interface{}) map[string]interface{} {
+	out := cloneVars(vars)
+	out["ROOT"] = doc
+	out["CURRENT"] = doc
+	return out
+}
+
 func evalComputedWithOpts(doc bson.M, expr interface{}, opts evalOpts) (interface{}, error) {
 	// Field reference: "$field.subfield"
 	if s, ok := expr.(string); ok {

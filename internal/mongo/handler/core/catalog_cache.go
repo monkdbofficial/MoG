@@ -4,6 +4,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"mog/internal/mongo/handler/shared"
 )
 
 // catalogCache avoids repeated catalogUpsert round-trips on hot paths.
@@ -125,6 +127,9 @@ func (c *catalogCache) listCollections(dbName string) []string {
 			continue
 		}
 		coll := k[len(prefix):]
+		if shared.IsInternalCollectionName(coll) {
+			continue
+		}
 		if coll != "" {
 			seen[coll] = struct{}{}
 		}

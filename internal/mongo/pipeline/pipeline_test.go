@@ -283,6 +283,94 @@ func TestApplyPipeline_Lookup_ArrayLocalField(t *testing.T) {
 	}
 }
 
+func TestApplyPipeline_Lookup_PipelineForm_WithLetAndExpr(t *testing.T) {
+	users := []bson.M{
+		{"_id": "u1", "user_id": 1, "name": "Alice", "manager_id": nil},
+		{"_id": "u2", "user_id": 2, "name": "Bob", "manager_id": 1},
+		{"_id": "u3", "user_id": 3, "name": "Cara", "manager_id": 1},
+	}
+
+	pipeline := []bson.M{
+		{"$lookup": bson.M{
+			"from": "users",
+			"let":  bson.M{"mgr_id": "$manager_id"},
+			"pipeline": []interface{}{
+				bson.M{"$match": bson.M{"$expr": bson.M{"$eq": []interface{}{"$user_id", "$$mgr_id"}}}},
+				bson.M{"$project": bson.M{"_id": 0, "user_id": 1, "name": 1, "mgr": "$$mgr_id"}},
+			},
+			"as": "manager",
+		}},
+	}
+
+	out, err := ApplyPipelineWithLookup(users, pipeline, func(from string) ([]bson.M, error) {
+		if from != "users" {
+			return nil, fmt.Errorf("unexpected from: %s", from)
+		}
+		return users, nil
+	})
+	if err != nil {
+		t.Fatalf("ApplyPipelineWithLookup err: %v", err)
+	}
+
+	// CEO has no manager.
+	if got := out[0]["manager"].([]bson.M); len(got) != 0 {
+		t.Fatalf("expected empty manager, got %#v", got)
+	}
+
+	// Bob's manager is Alice.
+	got := out[1]["manager"].([]bson.M)
+	if len(got) != 1 || got[0]["user_id"] != 1 || got[0]["name"] != "Alice" || got[0]["mgr"] != 1 {
+		t.Fatalf("unexpected manager: %#v", got)
+	}
+}
+
+func TestApplyPipeline_BucketAuto_Basic(t *testing.T) {
+	docs := []bson.M{
+		{"_id": 1, "n": 10},
+		{"_id": 2, "n": 20},
+		{"_id": 3, "n": 30},
+		{"_id": 4, "n": 40},
+		{"_id": 5, "n": 50},
+	}
+
+	out, err := ApplyPipeline(docs, []bson.M{{
+		"$bucketAuto": bson.M{
+			"groupBy": "$n",
+			"buckets": 3,
+		},
+	}})
+	if err != nil {
+		t.Fatalf("ApplyPipeline err: %v", err)
+	}
+	if len(out) != 3 {
+		t.Fatalf("expected 3 buckets, got %d: %#v", len(out), out)
+	}
+	if out[0]["count"].(int64)+out[1]["count"].(int64)+out[2]["count"].(int64) != int64(len(docs)) {
+		t.Fatalf("expected counts to sum to %d, got %#v", len(docs), out)
+	}
+}
+
+func TestApplyPipeline_CollStats_Placeholder(t *testing.T) {
+	out, err := ApplyPipeline([]bson.M{{"_id": 1}}, []bson.M{{
+		"$collStats": bson.M{
+			"latencyStats": bson.M{"histograms": true},
+			"storageStats": bson.M{},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("ApplyPipeline err: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected 1 doc, got %d: %#v", len(out), out)
+	}
+	if _, ok := out[0]["latencyStats"].(bson.M); !ok {
+		t.Fatalf("expected latencyStats doc, got %#v", out[0]["latencyStats"])
+	}
+	if _, ok := out[0]["storageStats"].(bson.M); !ok {
+		t.Fatalf("expected storageStats doc, got %#v", out[0]["storageStats"])
+	}
+}
+
 func TestApplyPipeline_Unwind_Simple(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "orders": []interface{}{bson.M{"id": 10}, bson.M{"id": 11}}},

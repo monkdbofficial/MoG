@@ -13,6 +13,10 @@ import (
 
 // $group stage and shared type/sort helpers.
 func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
+	return applyGroupWithVars(docs, spec, nil)
+}
+
+func applyGroupWithVars(docs []bson.M, spec bson.M, vars map[string]interface{}) ([]bson.M, error) {
 	rawID, ok := spec["_id"]
 	if !ok {
 		return nil, fmt.Errorf("$group requires _id")
@@ -34,7 +38,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 	order := []string{}
 
 	for _, d := range docs {
-		id, err := evalGroupID(d, rawID)
+		id, err := evalGroupIDWithVars(d, rawID, vars)
 		if err != nil {
 			return nil, err
 		}
@@ -67,7 +71,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 
 		for outField, acc := range accSpecs {
 			if avgArg, ok := acc["$avg"]; ok {
-				val, err := evalValue(d, avgArg)
+				val, err := evalValueWithVars(d, avgArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -86,7 +90,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 					continue
 				}
 
-				val, err := evalValue(d, sumArg)
+				val, err := evalValueWithVars(d, sumArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -108,7 +112,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				continue
 			}
 			if addArg, ok := acc["$addToSet"]; ok {
-				val, err := evalValue(d, addArg)
+				val, err := evalValueWithVars(d, addArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -123,7 +127,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				continue
 			}
 			if maxArg, ok := acc["$max"]; ok {
-				val, err := evalValue(d, maxArg)
+				val, err := evalValueWithVars(d, maxArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -137,7 +141,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				continue
 			}
 			if minArg, ok := acc["$min"]; ok {
-				val, err := evalValue(d, minArg)
+				val, err := evalValueWithVars(d, minArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -154,7 +158,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				if st.firstSet[outField] {
 					continue
 				}
-				val, err := evalValue(d, firstArg)
+				val, err := evalValueWithVars(d, firstArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -163,7 +167,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				continue
 			}
 			if lastArg, ok := acc["$last"]; ok {
-				val, err := evalValue(d, lastArg)
+				val, err := evalValueWithVars(d, lastArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -172,7 +176,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				continue
 			}
 			if pushArg, ok := acc["$push"]; ok {
-				val, err := evalValue(d, pushArg)
+				val, err := evalValueWithVars(d, pushArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -270,9 +274,17 @@ func addToSetKey(v interface{}) string {
 }
 
 func evalGroupID(doc bson.M, rawID interface{}) (interface{}, error) {
-	// Field path: "$age"
+	return evalGroupIDWithVars(doc, rawID, nil)
+}
+
+func evalGroupIDWithVars(doc bson.M, rawID interface{}, vars map[string]interface{}) (interface{}, error) {
+	// Field path: "$age" (fast-path).
 	if s, ok := rawID.(string); ok && len(s) > 1 && s[0] == '$' {
 		return getPathValue(doc, s[1:]), nil
+	}
+	// Expression form: {"$toLower": "$name"} etc (and $$vars in $lookup).
+	if m, ok := coerceBsonM(rawID); ok && docHasOperatorKeys(m) {
+		return evalComputedWithOpts(doc, m, evalOpts{sizeNonArrayZero: false, vars: stageVars(doc, vars)})
 	}
 	// Constant (null/number/string/etc)
 	return rawID, nil

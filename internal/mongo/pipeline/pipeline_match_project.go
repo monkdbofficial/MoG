@@ -10,17 +10,38 @@ import (
 
 // $match/$project/$addFields expression plumbing and helpers.
 func applyMatch(docs []bson.M, filter bson.M) []bson.M {
+	return applyMatchWithVars(docs, filter, nil)
+}
+
+func applyMatchWithVars(docs []bson.M, filter bson.M, vars map[string]interface{}) []bson.M {
 	var out []bson.M
 	for _, d := range docs {
-		if matchDoc(d, filter) {
+		if matchDocWithVars(d, filter, vars) {
 			out = append(out, d)
 		}
 	}
 	return out
 }
 
-func matchDoc(doc bson.M, filter bson.M) bool {
+func matchDoc(doc bson.M, filter bson.M) bool { return matchDocWithVars(doc, filter, nil) }
+
+func matchDocWithVars(doc bson.M, filter bson.M, vars map[string]interface{}) bool {
+	// Support $expr at the top level of a $match document.
+	//
+	// Note: this matcher is intentionally limited; it focuses on the subset of
+	// MongoDB semantics used by MoG's in-memory pipeline evaluator.
+	if rawExpr, ok := filter["$expr"]; ok {
+		opts := evalOpts{sizeNonArrayZero: false, vars: stageVars(doc, vars)}
+		v, err := evalComputedWithOpts(doc, rawExpr, opts)
+		if err != nil || !isTruthy(v) {
+			return false
+		}
+	}
+
 	for k, v := range filter {
+		if k == "$expr" {
+			continue
+		}
 		fieldVal := getPathValue(doc, k)
 		// Treat missing/null as None => condition fails.
 		if fieldVal == nil {
@@ -197,12 +218,20 @@ func anyIn(arr []interface{}, list []interface{}) bool {
 }
 
 func applyProject(docs []bson.M, proj bson.M) ([]bson.M, error) {
+	return applyProjectWithVars(docs, proj, nil)
+}
+
+func applyProjectWithVars(docs []bson.M, proj bson.M, vars map[string]interface{}) ([]bson.M, error) {
 	include := map[string]bool{}
-	computed := map[string]bson.M{}
+	computed := map[string]interface{}{}
 	for k, v := range proj {
 		switch vv := v.(type) {
 		case int:
 			if vv == 1 {
+				include[k] = true
+			}
+		case bool:
+			if vv {
 				include[k] = true
 			}
 		case int32:
@@ -217,10 +246,10 @@ func applyProject(docs []bson.M, proj bson.M) ([]bson.M, error) {
 			if vv == 1 {
 				include[k] = true
 			}
-		case bson.M:
-			computed[k] = vv
 		default:
-			// ignore unsupported projections for now
+			// Treat anything else as a computed expression (e.g. "$field", "$$var",
+			// constants, or operator documents).
+			computed[k] = vv
 		}
 	}
 
@@ -239,7 +268,7 @@ func applyProject(docs []bson.M, proj bson.M) ([]bson.M, error) {
 			}
 		}
 		for k, expr := range computed {
-			val, err := evalComputedWithOpts(d, expr, evalOpts{sizeNonArrayZero: true, vars: map[string]interface{}{"ROOT": d, "CURRENT": d}})
+			val, err := evalComputedWithOpts(d, expr, evalOpts{sizeNonArrayZero: true, vars: stageVars(d, vars)})
 			if err != nil {
 				return nil, err
 			}
@@ -330,6 +359,10 @@ func mergeProjectedValue(existing, projected interface{}) interface{} {
 }
 
 func applyAddFields(docs []bson.M, spec bson.M) ([]bson.M, error) {
+	return applyAddFieldsWithVars(docs, spec, nil)
+}
+
+func applyAddFieldsWithVars(docs []bson.M, spec bson.M, vars map[string]interface{}) ([]bson.M, error) {
 	out := make([]bson.M, 0, len(docs))
 	for _, d := range docs {
 		// Don't mutate original documents.
@@ -339,7 +372,7 @@ func applyAddFields(docs []bson.M, spec bson.M) ([]bson.M, error) {
 		}
 
 		for field, rawExpr := range spec {
-			val, err := evalAddFieldsValue(d, rawExpr)
+			val, err := evalAddFieldsValueWithVars(d, rawExpr, vars)
 			if err != nil {
 				return nil, err
 			}
@@ -358,7 +391,11 @@ func applyAddFields(docs []bson.M, spec bson.M) ([]bson.M, error) {
 }
 
 func evalAddFieldsValue(doc bson.M, expr interface{}) (interface{}, error) {
-	return evalComputedWithOpts(doc, expr, evalOpts{sizeNonArrayZero: false, vars: map[string]interface{}{"ROOT": doc, "CURRENT": doc}})
+	return evalAddFieldsValueWithVars(doc, expr, nil)
+}
+
+func evalAddFieldsValueWithVars(doc bson.M, expr interface{}, vars map[string]interface{}) (interface{}, error) {
+	return evalComputedWithOpts(doc, expr, evalOpts{sizeNonArrayZero: false, vars: stageVars(doc, vars)})
 }
 
 func isArrayValue(v interface{}) bool {
@@ -418,27 +455,11 @@ func isTruthy(v interface{}) bool {
 }
 
 func evalValue(doc bson.M, v interface{}) (interface{}, error) {
-	if s, ok := v.(string); ok && strings.HasPrefix(s, "$$") {
-		key := strings.TrimPrefix(s, "$$")
-		varName := key
-		rest := ""
-		if i := strings.IndexByte(key, '.'); i >= 0 {
-			varName = key[:i]
-			rest = key[i+1:]
-		}
-		switch varName {
-		case "ROOT", "CURRENT":
-			if rest == "" {
-				return doc, nil
-			}
-			return getPathValue(doc, rest), nil
-		default:
-			return nil, nil
-		}
-	}
-	if s, ok := v.(string); ok && len(s) > 1 && s[0] == '$' {
-		f := s[1:]
-		return getPathValue(doc, f), nil
-	}
-	return v, nil
+	return evalValueWithVars(doc, v, nil)
+}
+
+func evalValueWithVars(doc bson.M, v interface{}, vars map[string]interface{}) (interface{}, error) {
+	// Historically evalValue supported only "$field" and $$ROOT/$$CURRENT; switch to
+	// the shared expression evaluator so $lookup "let" variables behave like MongoDB.
+	return evalComputedWithOpts(doc, v, evalOpts{sizeNonArrayZero: false, vars: stageVars(doc, vars)})
 }

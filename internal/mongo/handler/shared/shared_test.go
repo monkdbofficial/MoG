@@ -105,6 +105,21 @@ func TestIdentifierMapping_RoundTrip(t *testing.T) {
 	}
 }
 
+func TestIsInternalCollectionName_GraphLookupHelpers(t *testing.T) {
+	if IsInternalCollectionName("") {
+		t.Fatalf("expected empty to be non-internal")
+	}
+	if !IsInternalCollectionName("users__graph_edges__nvqw4ylhmvzf62le_ovzwk4s7nfsa") {
+		t.Fatalf("expected graph edges helper to be internal")
+	}
+	if !IsInternalCollectionName("users__graph_vertices__abc_def") {
+		t.Fatalf("expected graph vertices helper to be internal")
+	}
+	if IsInternalCollectionName("users") {
+		t.Fatalf("did not expect normal collection to be internal")
+	}
+}
+
 func TestOrderTopLevelDocForReply(t *testing.T) {
 	in := bson.M{
 		"b":   2,

@@ -156,6 +156,11 @@ func (h *Handler) listColumnsExec(ctx context.Context, exec DBExecutor, physical
 				if col == "" {
 					continue
 				}
+				// Skip backend-exposed "object sub-columns" like `meta['path']`.
+				// We only want top-level physical columns here.
+				if strings.Contains(col, "['") {
+					continue
+				}
 				cols = append(cols, strings.ToLower(col))
 			}
 			c.mu.RUnlock()
@@ -186,6 +191,11 @@ func (h *Handler) listColumnsExec(ctx context.Context, exec DBExecutor, physical
 	for rows.Next() {
 		var c string
 		if err := rows.Scan(&c); err == nil && c != "" {
+			// CrateDB exposes object sub-columns in information_schema with names like
+			// `meta['path']` or `data['user_id']`. These are not physical columns.
+			if strings.Contains(c, "['") {
+				continue
+			}
 			cols = append(cols, strings.ToLower(c))
 		}
 	}

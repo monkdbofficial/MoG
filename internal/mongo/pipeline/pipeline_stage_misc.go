@@ -8,17 +8,25 @@ import (
 
 // Stage implementations that primarily restructure or combine result sets.
 func applyReplaceRoot(docs []bson.M, spec bson.M) ([]bson.M, error) {
+	return applyReplaceRootVars(docs, spec, nil)
+}
+
+func applyReplaceRootVars(docs []bson.M, spec bson.M, vars map[string]interface{}) ([]bson.M, error) {
 	newRoot, ok := spec["newRoot"]
 	if !ok {
 		return nil, fmt.Errorf("$replaceRoot requires newRoot")
 	}
-	return applyReplaceWith(docs, newRoot)
+	return applyReplaceWithVars(docs, newRoot, vars)
 }
 
 func applyReplaceWith(docs []bson.M, expr interface{}) ([]bson.M, error) {
+	return applyReplaceWithVars(docs, expr, nil)
+}
+
+func applyReplaceWithVars(docs []bson.M, expr interface{}, vars map[string]interface{}) ([]bson.M, error) {
 	out := make([]bson.M, 0, len(docs))
 	for _, d := range docs {
-		opts := evalOpts{sizeNonArrayZero: false, vars: map[string]interface{}{"ROOT": d, "CURRENT": d}}
+		opts := evalOpts{sizeNonArrayZero: false, vars: stageVars(d, vars)}
 		v, err := evalComputedWithOpts(d, expr, opts)
 		if err != nil {
 			return nil, err
@@ -37,6 +45,10 @@ func applyReplaceWith(docs []bson.M, expr interface{}) ([]bson.M, error) {
 }
 
 func applySortByCount(docs []bson.M, expr interface{}) ([]bson.M, error) {
+	return applySortByCountVars(docs, expr, nil)
+}
+
+func applySortByCountVars(docs []bson.M, expr interface{}, vars map[string]interface{}) ([]bson.M, error) {
 	type state struct {
 		key interface{}
 		n   int64
@@ -44,7 +56,7 @@ func applySortByCount(docs []bson.M, expr interface{}) ([]bson.M, error) {
 	byKey := map[string]*state{}
 	order := []string{}
 	for _, d := range docs {
-		opts := evalOpts{sizeNonArrayZero: false, vars: map[string]interface{}{"ROOT": d, "CURRENT": d}}
+		opts := evalOpts{sizeNonArrayZero: false, vars: stageVars(d, vars)}
 		k, err := evalComputedWithOpts(d, expr, opts)
 		if err != nil {
 			return nil, err
