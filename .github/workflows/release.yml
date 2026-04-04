@@ -69,11 +69,14 @@ jobs:
 
           build_one linux amd64
           build_one linux arm64
+          build_one linux 386
+          build_one linux arm 6
           build_one linux arm 7
           build_one darwin amd64
           build_one darwin arm64
           build_one windows amd64
           build_one windows arm64
+          build_one windows 386
           build_one freebsd amd64
           build_one freebsd arm64
 

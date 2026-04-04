@@ -26,9 +26,9 @@ MoG uses a tag-driven GitHub Actions workflow to build and publish release artif
 
 3. The `Release` workflow will:
    - cross-compile `mog` for:
-     - Linux: `amd64`, `arm64`, `armv7`
+     - Linux: `amd64`, `arm64`, `386`, `armv6`, `armv7`
      - macOS: `amd64`, `arm64`
-     - Windows: `amd64`, `arm64`
+     - Windows: `amd64`, `arm64`, `386`
      - FreeBSD: `amd64`, `arm64`
    - package artifacts into `dist/` (`.tar.gz` / `.zip`)
    - embed build metadata in `mog --version` and include `BUILD_INFO.txt` inside every archive
