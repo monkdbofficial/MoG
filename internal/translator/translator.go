@@ -1,3 +1,10 @@
+// Package translator converts a subset of MongoDB query/update semantics into
+// SQL statements over MonkDB/Postgres JSONB storage.
+//
+// The Translator is used by the Mongo wire-protocol handler to turn incoming
+// command documents into parameterized SQL plus argument lists suitable for
+// pgx. The translation is intentionally conservative: unsupported operators or
+// unsafe field paths are rejected with an error rather than being guessed.
 package translator
 
 import (
@@ -8,20 +15,38 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// Translator translates MongoDB queries into SQL for JSONB.
+// Translator translates MongoDB-like command documents into parameterized SQL.
+//
+// Methods generally return:
+//   - a SQL string containing Postgres-style placeholders (`$1`, `$2`, ...),
+//   - a corresponding argument slice in placeholder order, and
+//   - an error when translation fails (unsupported operator, unsafe identifier,
+//     invalid stage shape, etc).
+//
+// Translator is stateless; a single instance can be reused across requests.
 type Translator struct{}
 
-// New creates a new Translator.
+// New returns a new Translator.
 func New() *Translator {
 	return &Translator{}
 }
 
+// AggregatePlan describes a fully translated SQL plan for an aggregation
+// pipeline.
+//
+// Fields lists the output column names in result order when the translation
+// produces a structured projection rather than a raw JSONB document.
 type AggregatePlan struct {
 	SQL    string
 	Args   []interface{}
 	Fields []string // column names in result order
 }
 
+// AggregatePrefixPlan describes a partial "pushdown" translation for the
+// prefix of an aggregation pipeline.
+//
+// The handler uses this to push supported leading stages into SQL while
+// leaving the remaining stages to be executed in-memory.
 type AggregatePrefixPlan struct {
 	Plan           *AggregatePlan
 	ConsumedStages int
@@ -45,7 +70,12 @@ func coerceDoc(v interface{}) (bson.M, bool) {
 	}
 }
 
-// TranslateFind translates a MongoDB find filter into a SQL WHERE clause.
+// TranslateFind translates a MongoDB `find` filter into a `SELECT ... WHERE`
+// query for the given collection.
+//
+// If filter is empty, the returned query selects all documents in the
+// collection. Errors are returned for unsupported operators or unsafe field
+// paths.
 func (t *Translator) TranslateFind(collection string, filter bson.M) (string, []interface{}, error) {
 	table := tableName(collection)
 	if len(filter) == 0 {
@@ -144,7 +174,11 @@ func (t *Translator) TranslateFindWithOptions(collection string, filter bson.M, 
 	return query, args, nil
 }
 
-// TranslateCount is a helper used by the adapter.
+// TranslateCount translates a MongoDB `count` filter into a `SELECT COUNT(*)`
+// query for the given collection.
+//
+// If filter is empty, the returned query counts all documents. Errors are
+// returned for unsupported operators or unsafe field paths.
 func (t *Translator) TranslateCount(collection string, filter bson.M) (string, []interface{}, error) {
 	table := tableName(collection)
 	if len(filter) == 0 {
@@ -162,8 +196,8 @@ func (t *Translator) TranslateCount(collection string, filter bson.M) (string, [
 
 // translateFilter is a helper used by the adapter.
 func (t *Translator) translateFilter(filter bson.M) (string, []interface{}, error) {
-	var conditions []string
-	var args []interface{}
+	conditions := make([]string, 0, len(filter))
+	args := make([]interface{}, 0, len(filter))
 	argCount := 1
 
 	for k, v := range filter {
@@ -216,8 +250,8 @@ func (t *Translator) translateCondition(field string, val interface{}, argCount 
 			case "$in":
 				// Handle $in operator
 				if inList, ok := opVal.([]interface{}); ok {
-					var placeholders []string
-					var vals []interface{}
+					placeholders := make([]string, 0, len(inList))
+					vals := make([]interface{}, 0, len(inList))
 					for _, item := range inList {
 						placeholders = append(placeholders, fmt.Sprintf("$%d", *argCount))
 						vals = append(vals, item)
@@ -243,14 +277,31 @@ func (t *Translator) translateCondition(field string, val interface{}, argCount 
 	return cond, []interface{}{val}, nil
 }
 
-// TranslateInsert translates a MongoDB insert document into a SQL INSERT statement.
+// TranslateInsert translates a MongoDB `insert` document into a SQL INSERT
+// statement for the given collection.
+//
+// The returned SQL uses a single parameter cast to OBJECT so callers can pass a
+// document value that is marshalled over the Postgres wire protocol. This
+// method does not currently validate document keys; validation and normalization
+// are expected to happen at higher layers.
 func (t *Translator) TranslateInsert(collection string, doc bson.M) (string, []interface{}, error) {
 	// Cast the parameter to OBJECT so callers can pass JSON text (works well over the Postgres wire protocol).
 	query := fmt.Sprintf("INSERT INTO %s (data) VALUES (CAST($1 AS OBJECT))", tableName(collection))
 	return query, []interface{}{doc}, nil
 }
 
-// TranslateUpdate translates a MongoDB update operation into a SQL UPDATE statement.
+// TranslateUpdate translates a MongoDB `update` command into a SQL UPDATE
+// statement.
+//
+// Supported operators:
+//   - `$set` for setting individual fields
+//   - `$inc` for numeric increments (missing/NULL values are treated as 0)
+//
+// If update contains no operator keys, it is treated as a replacement document
+// and translated as a `$set` of top-level fields.
+//
+// Errors are returned for unsupported operators, invalid/unsafe field paths, or
+// when the update document does not contain any supported assignments.
 func (t *Translator) TranslateUpdate(collection string, filter bson.M, update bson.M) (string, []interface{}, error) {
 	setDoc, _ := coerceDoc(update["$set"])
 	incDoc, _ := coerceDoc(update["$inc"])
@@ -314,7 +365,11 @@ func (t *Translator) TranslateUpdate(collection string, filter bson.M, update bs
 	return query, args, nil
 }
 
-// TranslateDelete translates a MongoDB delete filter into a SQL DELETE statement.
+// TranslateDelete translates a MongoDB `delete` filter into a SQL DELETE
+// statement for the given collection.
+//
+// If filter is empty, the returned query deletes all rows in the collection.
+// Errors are returned for unsupported operators or unsafe field paths.
 func (t *Translator) TranslateDelete(collection string, filter bson.M) (string, []interface{}, error) {
 	table := tableName(collection)
 	if len(filter) == 0 {
@@ -330,7 +385,13 @@ func (t *Translator) TranslateDelete(collection string, filter bson.M) (string, 
 	return query, args, nil
 }
 
-// TranslateAggregate translates a MongoDB aggregation pipeline into a SQL query.
+// TranslateAggregate translates a MongoDB aggregation pipeline into a best-effort
+// SQL query.
+//
+// This method supports a small subset of stages (currently `$match`, `$sort`,
+// `$limit`) and builds nested subqueries as needed. For strict pushdown planning
+// (with validation and richer projections), prefer TranslateAggregatePlan or
+// TranslateAggregatePrefixPlan.
 func (t *Translator) TranslateAggregate(collection string, pipeline []bson.M) (string, []interface{}, error) {
 	var args []interface{}
 	argCount := 1
@@ -969,24 +1030,12 @@ done:
 
 // tableName is a helper used by the adapter.
 func tableName(collection string) string {
-	return fmt.Sprintf("doc.%s", collection)
+	return "doc." + collection
 }
 
 // isSafeIdentifier is a helper used by the adapter.
 func isSafeIdentifier(name string) bool {
-	if name == "" {
-		return false
-	}
-	for _, r := range name {
-		if r == '_' {
-			continue
-		}
-		if strings.ContainsRune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789", r) {
-			continue
-		}
-		return false
-	}
-	return true
+	return isSafeIdentifierSpan(name, 0, len(name))
 }
 
 // isSafePath is a helper used by the adapter.
@@ -994,13 +1043,16 @@ func isSafePath(path string) bool {
 	if path == "" {
 		return false
 	}
-	parts := strings.Split(path, ".")
-	for _, p := range parts {
-		if p == "" {
-			return false
-		}
-		if !isSafeIdentifier(p) {
-			return false
+	segStart := 0
+	for i := 0; i <= len(path); i++ {
+		if i == len(path) || path[i] == '.' {
+			if i == segStart {
+				return false
+			}
+			if !isSafeIdentifierSpan(path, segStart, i) {
+				return false
+			}
+			segStart = i + 1
 		}
 	}
 	return true
@@ -1008,18 +1060,33 @@ func isSafePath(path string) bool {
 
 // dataAccessor is a helper used by the adapter.
 func dataAccessor(path string) string {
-	parts := strings.Split(path, ".")
-	acc := "data"
-	for _, p := range parts {
-		acc += fmt.Sprintf("['%s']", p)
+	// Expected pattern: "data['a']['b']..." for each '.'-separated path segment.
+	// This is used in hot paths, so avoid strings.Split + repeated concatenation.
+	var b strings.Builder
+	b.WriteString("data")
+
+	// Best-effort capacity guess: base + 6 bytes overhead per segment + segment bytes.
+	// overhead per segment is "['" + "']" (4) plus brackets (2) => actually 4,
+	// but keep a small cushion to reduce regrows.
+	totalLen := 4 + len(path) + 4
+	b.Grow(totalLen)
+
+	segStart := 0
+	for i := 0; i <= len(path); i++ {
+		if i == len(path) || path[i] == '.' {
+			b.WriteString("['")
+			b.WriteString(path[segStart:i])
+			b.WriteString("']")
+			segStart = i + 1
+		}
 	}
-	return acc
+	return b.String()
 }
 
 // translateFilterWithArgs is a helper used by the adapter.
 func (t *Translator) translateFilterWithArgs(filter bson.M, argCount *int) (string, []interface{}, error) {
-	var conditions []string
-	var args []interface{}
+	conditions := make([]string, 0, len(filter))
+	args := make([]interface{}, 0, len(filter))
 
 	for k, v := range filter {
 		condition, val, err := t.translateCondition(k, v, argCount)
@@ -1031,4 +1098,22 @@ func (t *Translator) translateFilterWithArgs(filter bson.M, argCount *int) (stri
 	}
 
 	return strings.Join(conditions, " AND "), args, nil
+}
+
+func isSafeIdentifierSpan(s string, start, end int) bool {
+	if start >= end {
+		return false
+	}
+	// Fast ASCII-only check: [A-Za-z0-9_]+
+	for i := start; i < end; i++ {
+		c := s[i]
+		if c == '_' ||
+			(c >= 'a' && c <= 'z') ||
+			(c >= 'A' && c <= 'Z') ||
+			(c >= '0' && c <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
 }

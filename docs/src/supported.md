@@ -67,6 +67,7 @@ Stages implemented in the in-memory pipeline:
 - `$sample`
 - `$facet` (in-memory)
 - `$graphLookup` (limited: `from`, `startWith`, `connectFromField`, `connectToField`, `maxDepth`, `as`)
+- `$vectorSearch` (hybrid: requires SQL pushdown; must be first stage or only preceded by `$match`; supports `$meta: "vectorSearchScore"`)
 - `$setWindowFields` (limited: partitionBy + single-field sortBy; `$avg` unbounded→current; `$rank`, `$denseRank`, `$documentNumber`, `$shift`)
 - `$replaceRoot` / `$replaceWith`
 - `$sortByCount`

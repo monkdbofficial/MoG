@@ -52,6 +52,7 @@ MoG is designed for teams that like MongoDB’s developer experience, but want M
 - [Testing](#testing)
 - [Documentation](#documentation)
 - [Contributing](#contributing)
+- [Changelog](#changelog)
 - [Security](#security)
 - [License](#license)
 - [Citation](#citation)
@@ -114,7 +115,10 @@ MoG implements a growing subset of MongoDB features. While not yet 100% MongoDB-
 MoG uses a **hybrid aggregation engine**. It pushes the longest possible prefix down to SQL (leading `$match`, then optional `$group`, `$sort`, `$limit`, or `$count`) and evaluates remaining stages in memory (Go) for correctness.
 
 #### Supported Stages
-`$match`, `$project`, `$addFields`, `$set`, `$unset`, `$group`, `$sort`, `$limit`, `$sample`, `$count`, `$lookup`, `$unwind`, `$facet`, `$sortByCount`, `$graphLookup`, `$setWindowFields` (subset), `$replaceRoot`, `$replaceWith`, `$unionWith`
+`$match`, `$project`, `$addFields`, `$set`, `$unset`, `$group`, `$sort`, `$limit`, `$sample`, `$count`, `$lookup`, `$unwind`, `$facet`, `$sortByCount`, `$graphLookup`, `$setWindowFields` (subset), `$replaceRoot`, `$replaceWith`, `$unionWith`, `$vectorSearch`
+
+#### Vector Search
+MoG supports `$vectorSearch` via SQL pushdown to MonkDB vector indexes. `$vectorSearch` must be the first stage, or only be preceded by `$match` stages. Use `$meta: "vectorSearchScore"` to project the score.
 
 | Expression Category | Supported Operators |
 | :--- | :--- |
@@ -174,9 +178,9 @@ MoG is configured via environment variables or a `.env` file.
 | `MOG_DB_NAME` | MonkDB backend database name. | `monkdb` |
 | `MOG_LOG_LEVEL` | Logging level (`debug`, `info`, `warn`, `error`). | `info` |
 | `MOG_METRICS_PORT` | Port for the Prometheus metrics exporter. | `8080` |
-| `MOG_SLOW_QUERY_THRESHOLD_MS` | Slow-query threshold (ms) for debug diagnostics. | `100` |
-| `MOG_SLOW_SCAN_THRESHOLD_MS` | Slow-scan threshold (ms) for debug diagnostics. | `50` |
-| `MOG_SLOW_ADAPTER_THRESHOLD_MS` | Slow adapter threshold (ms) for debug diagnostics. | `150` |
+| `MOG_SLOW_QUERY_THRESHOLD_MS` | Optional slow-query threshold (ms) for diagnostic logging (set `0` to disable). | `100` |
+| `MOG_SLOW_SCAN_THRESHOLD_MS` | Optional slow-scan threshold (ms) for diagnostic logging (set `0` to disable). | `50` |
+| `MOG_SLOW_ADAPTER_THRESHOLD_MS` | Optional slow-adapter threshold (ms) for diagnostic logging (set `0` to disable). | `150` |
 | `MOG_STORE_RAW_MONGO_JSON` | Mirror full document into a `data` column (`OBJECT(DYNAMIC)`). | `0` |
 | `MOG_INFO_LOG_WRITES` | Enable info-level logs for write operations. | `0` |
 | `MOG_FLOAT_VECTOR_SIMILARITY` | Default similarity used when MoG auto-creates `FLOAT_VECTOR` columns (`euclidean`/`l2`, `cosine`/`cosine_similarity`/`cosine-similarity`, `dot_product`/`dotproduct`/`dot-product`, `maximum_inner_product`/`max_inner_product`/`mips`). | _(empty)_ |
@@ -189,6 +193,8 @@ MoG is configured via environment variables or a `.env` file.
 | `MOG_BLOB_INLINE_READS` | Inline blob content back into replies (dereference pointers). | `0` |
 | `MOG_BLOB_INLINE_MAX_BYTES` | Max bytes to inline per blob when inline reads enabled. | `1048576` |
 | `MOG_BLOB_INLINE_STRICT` | If `1`, error when blob can’t be inlined; if `0`, return pointer. | `0` |
+
+Note: the `MOG_SLOW_*_THRESHOLD_MS` variables only affect diagnostic logging (they do not change query behavior).
 
 ### BLOB Storage (Optional)
 
@@ -233,6 +239,10 @@ mkdocs serve -f docs/mkdocs.yml
 ## Contributing
 
 Contributions are welcome! Please read our [CONTRIBUTING.md](CONTRIBUTING.md) and [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) for details on our code of conduct and the process for submitting pull requests.
+
+## Changelog
+
+See [CHANGELOG.md](CHANGELOG.md).
 
 ## Security
 
