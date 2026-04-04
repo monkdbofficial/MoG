@@ -8,6 +8,7 @@ const (
 	ctxKeyRemoteAddr ctxKey = iota
 )
 
+// WithRemoteAddr returns a derived value.
 func WithRemoteAddr(ctx context.Context, remoteAddr string) context.Context {
 	if ctx == nil {
 		ctx = context.Background()
@@ -15,6 +16,7 @@ func WithRemoteAddr(ctx context.Context, remoteAddr string) context.Context {
 	return context.WithValue(ctx, ctxKeyRemoteAddr, remoteAddr)
 }
 
+// RemoteAddr is a helper used by the adapter.
 func RemoteAddr(ctx context.Context) string {
 	if ctx == nil {
 		return ""

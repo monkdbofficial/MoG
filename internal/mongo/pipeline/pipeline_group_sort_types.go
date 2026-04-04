@@ -11,8 +11,13 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// $group stage and shared type/sort helpers.
+// applyGroup evaluates a $group stage.
 func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
+	return applyGroupWithVars(docs, spec, nil)
+}
+
+// applyGroupWithVars is a helper used by the adapter.
+func applyGroupWithVars(docs []bson.M, spec bson.M, vars map[string]interface{}) ([]bson.M, error) {
 	rawID, ok := spec["_id"]
 	if !ok {
 		return nil, fmt.Errorf("$group requires _id")
@@ -34,7 +39,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 	order := []string{}
 
 	for _, d := range docs {
-		id, err := evalGroupID(d, rawID)
+		id, err := evalGroupIDWithVars(d, rawID, vars)
 		if err != nil {
 			return nil, err
 		}
@@ -67,7 +72,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 
 		for outField, acc := range accSpecs {
 			if avgArg, ok := acc["$avg"]; ok {
-				val, err := evalValue(d, avgArg)
+				val, err := evalValueWithVars(d, avgArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -86,7 +91,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 					continue
 				}
 
-				val, err := evalValue(d, sumArg)
+				val, err := evalValueWithVars(d, sumArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -108,7 +113,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				continue
 			}
 			if addArg, ok := acc["$addToSet"]; ok {
-				val, err := evalValue(d, addArg)
+				val, err := evalValueWithVars(d, addArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -123,7 +128,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				continue
 			}
 			if maxArg, ok := acc["$max"]; ok {
-				val, err := evalValue(d, maxArg)
+				val, err := evalValueWithVars(d, maxArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -137,7 +142,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				continue
 			}
 			if minArg, ok := acc["$min"]; ok {
-				val, err := evalValue(d, minArg)
+				val, err := evalValueWithVars(d, minArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -154,7 +159,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				if st.firstSet[outField] {
 					continue
 				}
-				val, err := evalValue(d, firstArg)
+				val, err := evalValueWithVars(d, firstArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -163,7 +168,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				continue
 			}
 			if lastArg, ok := acc["$last"]; ok {
-				val, err := evalValue(d, lastArg)
+				val, err := evalValueWithVars(d, lastArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -172,7 +177,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 				continue
 			}
 			if pushArg, ok := acc["$push"]; ok {
-				val, err := evalValue(d, pushArg)
+				val, err := evalValueWithVars(d, pushArg, vars)
 				if err != nil {
 					return nil, err
 				}
@@ -241,6 +246,7 @@ func applyGroup(docs []bson.M, spec bson.M) ([]bson.M, error) {
 	return out, nil
 }
 
+// addToSetKey is a helper used by the adapter.
 func addToSetKey(v interface{}) string {
 	if v == nil {
 		return "nil"
@@ -269,15 +275,26 @@ func addToSetKey(v interface{}) string {
 	return fmt.Sprintf("%T:%v", v, v)
 }
 
+// evalGroupID is a helper used by the adapter.
 func evalGroupID(doc bson.M, rawID interface{}) (interface{}, error) {
-	// Field path: "$age"
+	return evalGroupIDWithVars(doc, rawID, nil)
+}
+
+// evalGroupIDWithVars is a helper used by the adapter.
+func evalGroupIDWithVars(doc bson.M, rawID interface{}, vars map[string]interface{}) (interface{}, error) {
+	// Field path: "$age" (fast-path).
 	if s, ok := rawID.(string); ok && len(s) > 1 && s[0] == '$' {
 		return getPathValue(doc, s[1:]), nil
+	}
+	// Expression form: {"$toLower": "$name"} etc (and $$vars in $lookup).
+	if m, ok := coerceBsonM(rawID); ok && docHasOperatorKeys(m) {
+		return evalComputedWithOpts(doc, m, evalOpts{sizeNonArrayZero: false, vars: stageVars(doc, vars)})
 	}
 	// Constant (null/number/string/etc)
 	return rawID, nil
 }
 
+// isNumericOne is a helper used by the adapter.
 func isNumericOne(v interface{}) bool {
 	switch x := v.(type) {
 	case int:
@@ -295,6 +312,7 @@ func isNumericOne(v interface{}) bool {
 	}
 }
 
+// applySort is a helper used by the adapter.
 func applySort(docs []bson.M, spec bson.M) []bson.M {
 	type keyDir struct {
 		key string
@@ -347,6 +365,7 @@ func applySort(docs []bson.M, spec bson.M) []bson.M {
 	return docs
 }
 
+// cmpNumber is a helper used by the adapter.
 func cmpNumber(a, b interface{}, fn func(float64, float64) bool) bool {
 	af, ok := toFloat64(a)
 	if !ok {
@@ -359,6 +378,7 @@ func cmpNumber(a, b interface{}, fn func(float64, float64) bool) bool {
 	return fn(af, bf)
 }
 
+// lessValue is a helper used by the adapter.
 func lessValue(a, b interface{}) bool {
 	if af, ok := toFloat64(a); ok {
 		if bf, ok := toFloat64(b); ok {
@@ -368,6 +388,7 @@ func lessValue(a, b interface{}) bool {
 	return fmt.Sprint(a) < fmt.Sprint(b)
 }
 
+// mongoTypeOf is a helper used by the adapter.
 func mongoTypeOf(v interface{}) interface{} {
 	if v == nil {
 		return "null"
@@ -396,6 +417,7 @@ func mongoTypeOf(v interface{}) interface{} {
 	}
 }
 
+// convertTo is a helper used by the adapter.
 func convertTo(to string, v interface{}) (interface{}, bool) {
 	switch to {
 	case "string":
@@ -445,6 +467,7 @@ func convertTo(to string, v interface{}) (interface{}, bool) {
 	}
 }
 
+// toInt64IfIntegral is a helper used by the adapter.
 func toInt64IfIntegral(v interface{}) (int64, bool) {
 	switch x := v.(type) {
 	case int:
@@ -476,6 +499,7 @@ func toInt64IfIntegral(v interface{}) (int64, bool) {
 	}
 }
 
+// toFloat64 is a helper used by the adapter.
 func toFloat64(v interface{}) (float64, bool) {
 	switch x := v.(type) {
 	case int:
@@ -499,6 +523,7 @@ func toFloat64(v interface{}) (float64, bool) {
 	}
 }
 
+// asInt is a helper used by the adapter.
 func asInt(v interface{}) (int, error) {
 	switch x := v.(type) {
 	case int:

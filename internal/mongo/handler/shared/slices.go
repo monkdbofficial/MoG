@@ -7,7 +7,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// docHasOperatorKeys returns true if m contains any "$"-prefixed keys.
+// DocHasOperatorKeys reports whether m contains any "$"-prefixed keys.
 //
 // This is used to distinguish between "operator documents" (e.g. {"$gt": 1})
 // and regular objects when evaluating filters and update expressions.
@@ -20,7 +20,7 @@ func DocHasOperatorKeys(m bson.M) bool {
 	return false
 }
 
-// coerceInterfaceSlice attempts to view v as a slice/array of interface{} while
+// CoerceInterfaceSlice attempts to view v as a slice/array of interface{} while
 // avoiding treating raw bytes as an array for MongoDB-like semantics.
 func CoerceInterfaceSlice(v interface{}) ([]interface{}, bool) {
 	switch t := v.(type) {

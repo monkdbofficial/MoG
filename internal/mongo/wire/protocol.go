@@ -52,6 +52,7 @@ type SectionBody struct {
 	Document []byte
 }
 
+// Kind is a helper used by the adapter.
 func (s SectionBody) Kind() byte { return 0 }
 
 // SectionDocumentSequence represents a Kind 1 section (Document Sequence).
@@ -61,6 +62,7 @@ type SectionDocumentSequence struct {
 	Documents  [][]byte
 }
 
+// Kind is a helper used by the adapter.
 func (s SectionDocumentSequence) Kind() byte { return 1 }
 
 // ReadOp reads a single wire operation from the reader.
@@ -173,6 +175,7 @@ func ParseOpMsg(header MsgHeader, body []byte) (*OpMsg, error) {
 	}, nil
 }
 
+// ParseOpQuery parses input into a structured value.
 func ParseOpQuery(header MsgHeader, body []byte) (*OpQuery, error) {
 	if len(body) < 12 {
 		return nil, fmt.Errorf("OpQuery body too short")
@@ -255,6 +258,7 @@ func (op *OpMsg) Marshal() ([]byte, error) {
 	return append(header, body...), nil
 }
 
+// Marshal is a helper used by the adapter.
 func (op *OpReply) Marshal() ([]byte, error) {
 	var body []byte
 

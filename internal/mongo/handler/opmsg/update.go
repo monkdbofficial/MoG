@@ -3,23 +3,37 @@ package opmsg
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"go.uber.org/zap"
 	"gopkg.in/mgo.v2/bson"
 
 	"mog/internal/logging"
+	mongopath "mog/internal/mongo"
 	"mog/internal/mongo/handler/shared"
 )
 
+// CmdUpdate is a helper used by the adapter.
 func CmdUpdate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byte, bool, error) {
 	col, ok := cmd["update"].(string)
 	if !ok {
 		return nil, false, nil
 	}
+	start := time.Now()
 
 	dbName := deps.CommandDB(cmd)
 	physical, err := deps.PhysicalCollectionName(dbName, col)
 	if err != nil {
+		mongopath.LogQuery(mongopath.QueryLogOptions{
+			Stage:         mongopath.RequestStageComplete,
+			Method:        "update",
+			Operation:     "update",
+			QueryName:     "update",
+			Table:         "",
+			Error:         err,
+			TotalDuration: time.Since(start),
+			StartedAt:     start,
+		})
 		resp, rerr := deps.NewMsgError(requestID, 2, "BadValue", err.Error())
 		return resp, true, rerr
 	}
@@ -47,6 +61,16 @@ func CmdUpdate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 		}
 	}
 	if !ok {
+		mongopath.LogQuery(mongopath.QueryLogOptions{
+			Stage:         mongopath.RequestStageComplete,
+			Method:        "update",
+			Operation:     "update",
+			QueryName:     "update",
+			Table:         physical,
+			Error:         fmt.Errorf("updates must be an array"),
+			TotalDuration: time.Since(start),
+			StartedAt:     start,
+		})
 		return nil, true, fmt.Errorf("updates must be an array")
 	}
 
@@ -57,6 +81,16 @@ func CmdUpdate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 	if tx == nil {
 		tx, err = deps.BeginTx(ctx)
 		if err != nil {
+			mongopath.LogQuery(mongopath.QueryLogOptions{
+				Stage:         mongopath.RequestStageComplete,
+				Method:        "update",
+				Operation:     "update",
+				QueryName:     "update",
+				Table:         physical,
+				Error:         err,
+				TotalDuration: time.Since(start),
+				StartedAt:     start,
+			})
 			return nil, true, err
 		}
 		ownedTx = true
@@ -98,11 +132,31 @@ func CmdUpdate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 			if deps.IsUndefinedRelation(err) || deps.IsUndefinedSchema(err) {
 				deps.ClearSchemaCache(physical)
 				if err := deps.EnsureCollectionTable(ctx, physical); err != nil {
+					mongopath.LogQuery(mongopath.QueryLogOptions{
+						Stage:         mongopath.RequestStageComplete,
+						Method:        "update",
+						Operation:     "update",
+						QueryName:     "update",
+						Table:         physical,
+						Error:         err,
+						TotalDuration: time.Since(start),
+						StartedAt:     start,
+					})
 					return nil, true, err
 				}
 				matched, modified, upsertedID, err = deps.ApplyPureSQLUpdate(ctx, tx, physical, filter, update, multi, upsert)
 			}
 			if err != nil {
+				mongopath.LogQuery(mongopath.QueryLogOptions{
+					Stage:         mongopath.RequestStageComplete,
+					Method:        "update",
+					Operation:     "update",
+					QueryName:     "update",
+					Table:         physical,
+					Error:         err,
+					TotalDuration: time.Since(start),
+					StartedAt:     start,
+				})
 				return nil, true, err
 			}
 		}
@@ -120,6 +174,16 @@ func CmdUpdate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 
 	if ownedTx {
 		if err := tx.Commit(ctx); err != nil {
+			mongopath.LogQuery(mongopath.QueryLogOptions{
+				Stage:         mongopath.RequestStageComplete,
+				Method:        "update",
+				Operation:     "update",
+				QueryName:     "update",
+				Table:         physical,
+				Error:         err,
+				TotalDuration: time.Since(start),
+				StartedAt:     start,
+			})
 			return nil, true, err
 		}
 	}
@@ -158,5 +222,16 @@ func CmdUpdate(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]b
 	}
 
 	resp, err := deps.NewMsg(requestID, respDoc)
+	mongopath.LogQuery(mongopath.QueryLogOptions{
+		Stage:         mongopath.RequestStageComplete,
+		Method:        "update",
+		Operation:     "update",
+		QueryName:     "update",
+		Table:         physical,
+		RowsAffected:  int64(nModified),
+		Error:         err,
+		TotalDuration: time.Since(start),
+		StartedAt:     start,
+	})
 	return resp, true, err
 }

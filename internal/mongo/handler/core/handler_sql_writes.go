@@ -13,6 +13,8 @@ import (
 )
 
 // SQL-backed write helpers.
+
+// updateRowFromDoc is a helper used by the adapter.
 func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physical string, docID string, doc bson.M) error {
 	if exec == nil || physical == "" || docID == "" {
 		return nil
@@ -159,6 +161,7 @@ func (h *Handler) updateRowFromDoc(ctx context.Context, exec DBExecutor, physica
 	return nil
 }
 
+// insertRowFromDoc is a helper used by the adapter.
 func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physical string, docID string, doc bson.M) error {
 	if exec == nil || physical == "" || docID == "" {
 		return nil
@@ -171,6 +174,22 @@ func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physica
 	}
 
 	storeRaw := h.storeRawMongoJSON || h.schemaCache().hasColumn(physical, "data")
+	colTypes := map[string]string{}
+	for _, k := range keysFromDoc(doc) {
+		v := doc[k]
+		col := shared.SQLColumnNameForField(k)
+		if col == "" || col == "id" || col == "data" {
+			continue
+		}
+		sqlType := sqlTypeForField(k, v)
+		if sqlType == "" {
+			continue
+		}
+		colTypes[col] = sqlType
+	}
+	if err := h.ensureCollectionTableWithColumnsExec(ctx, exec, physical, colTypes); err != nil {
+		return err
+	}
 
 	cols := []string{"id"}
 	exprs := []string{"$1"}
@@ -186,14 +205,7 @@ func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physica
 		exprs = append(exprs, fmt.Sprintf("CAST($%d AS OBJECT(DYNAMIC))", len(args)))
 	}
 
-	var keys []string
-	for k := range doc {
-		if k == "" || k == "_id" {
-			continue
-		}
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
+	keys := keysFromDoc(doc)
 
 	for _, k := range keys {
 		v := doc[k]
@@ -289,4 +301,17 @@ func (h *Handler) insertRowFromDoc(ctx context.Context, exec DBExecutor, physica
 		return err2
 	}
 	return err
+}
+
+// keysFromDoc is a helper used by the adapter.
+func keysFromDoc(doc bson.M) []string {
+	keys := make([]string, 0, len(doc))
+	for k := range doc {
+		if k == "" || k == "_id" {
+			continue
+		}
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }

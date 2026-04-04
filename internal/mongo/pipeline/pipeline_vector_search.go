@@ -8,7 +8,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// $vectorSearch stage implementation.
+// applyVectorSearch evaluates a $vectorSearch stage in-memory.
 func applyVectorSearch(docs []bson.M, spec bson.M) ([]bson.M, error) {
 	path, _ := spec["path"].(string)
 	if path == "" {
@@ -87,6 +87,7 @@ func applyVectorSearch(docs []bson.M, spec bson.M) ([]bson.M, error) {
 	return out, nil
 }
 
+// l2Norm is a helper used by the adapter.
 func l2Norm(v []float64) float64 {
 	sum := 0.0
 	for _, x := range v {

@@ -2,12 +2,14 @@ package shared
 
 import (
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
 	"gopkg.in/mgo.v2/bson"
 )
 
+// TestPrimaryCommandKey_SkipsMetadataAndSorts runs the corresponding test case.
 func TestPrimaryCommandKey_SkipsMetadataAndSorts(t *testing.T) {
 	cmd := bson.M{
 		"$db":       "admin",
@@ -25,6 +27,7 @@ func TestPrimaryCommandKey_SkipsMetadataAndSorts(t *testing.T) {
 	}
 }
 
+// TestCommandDBAndAsString runs the corresponding test case.
 func TestCommandDBAndAsString(t *testing.T) {
 	if got := CommandDB(bson.M{"$db": "app"}); got != "app" {
 		t.Fatalf("unexpected db: %q", got)
@@ -47,6 +50,7 @@ func TestCommandDBAndAsString(t *testing.T) {
 	}
 }
 
+// TestFilterHasOperatorAndStripOperatorKeys runs the corresponding test case.
 func TestFilterHasOperatorAndStripOperatorKeys(t *testing.T) {
 	filter := bson.M{
 		"age":  bson.M{"$gt": 10, "$lt": 20},
@@ -68,6 +72,7 @@ func TestFilterHasOperatorAndStripOperatorKeys(t *testing.T) {
 	}
 }
 
+// TestIdentifierMapping_RoundTrip runs the corresponding test case.
 func TestIdentifierMapping_RoundTrip(t *testing.T) {
 	tests := []string{
 		"_id",
@@ -104,13 +109,30 @@ func TestIdentifierMapping_RoundTrip(t *testing.T) {
 	}
 }
 
+// TestIsInternalCollectionName_GraphLookupHelpers runs the corresponding test case.
+func TestIsInternalCollectionName_GraphLookupHelpers(t *testing.T) {
+	if IsInternalCollectionName("") {
+		t.Fatalf("expected empty to be non-internal")
+	}
+	if !IsInternalCollectionName("users__graph_edges__nvqw4ylhmvzf62le_ovzwk4s7nfsa") {
+		t.Fatalf("expected graph edges helper to be internal")
+	}
+	if !IsInternalCollectionName("users__graph_vertices__abc_def") {
+		t.Fatalf("expected graph vertices helper to be internal")
+	}
+	if IsInternalCollectionName("users") {
+		t.Fatalf("did not expect normal collection to be internal")
+	}
+}
+
+// TestOrderTopLevelDocForReply runs the corresponding test case.
 func TestOrderTopLevelDocForReply(t *testing.T) {
 	in := bson.M{
 		"b":   2,
 		"_id": "x",
 		"a":   1,
 	}
-	out := OrderTopLevelDocForReply(in)
+	out := OrderTopLevelDocForReply(in, nil)
 	if len(out) != 3 {
 		t.Fatalf("unexpected length: %d", len(out))
 	}
@@ -122,6 +144,42 @@ func TestOrderTopLevelDocForReply(t *testing.T) {
 	}
 }
 
+// TestOrderTopLevelDocForReply_LeavesNestedValuesUnchanged runs the corresponding test case.
+func TestOrderTopLevelDocForReply_LeavesNestedValuesUnchanged(t *testing.T) {
+	in := bson.M{
+		"_id": "x",
+		"z": bson.M{
+			"b": 2,
+			"a": 1,
+		},
+		"arr": []interface{}{
+			bson.M{"y": 2, "x": 1},
+		},
+	}
+	out := OrderTopLevelDocForReply(in, nil)
+	if nested, ok := out[2].Value.(bson.M); !ok || nested["a"] != 1 || nested["b"] != 2 {
+		t.Fatalf("expected nested doc left as bson.M, got %#v", out[2].Value)
+	}
+	arr, ok := out[1].Value.([]interface{})
+	if !ok || len(arr) != 1 {
+		t.Fatalf("expected array unchanged, got %#v", out[1].Value)
+	}
+	nestedArrDoc, ok := arr[0].(bson.M)
+	if !ok || nestedArrDoc["x"] != 1 || nestedArrDoc["y"] != 2 {
+		t.Fatalf("expected nested doc inside array unchanged, got %#v", arr[0])
+	}
+}
+
+// TestOrderTopLevelDocForReply_PrefersProvidedOrder runs the corresponding test case.
+func TestOrderTopLevelDocForReply_PrefersProvidedOrder(t *testing.T) {
+	in := bson.M{"manager_id": 2, "_id": "u4", "active": false, "name": "Dan", "user_id": 4}
+	out := OrderTopLevelDocForReply(in, []string{"_id", "user_id", "name", "manager_id"})
+	if got := []string{out[0].Name, out[1].Name, out[2].Name, out[3].Name, out[4].Name}; fmt.Sprint(got) != fmt.Sprint([]string{"_id", "user_id", "name", "manager_id", "active"}) {
+		t.Fatalf("unexpected order: %#v", out)
+	}
+}
+
+// TestCoerceBsonM runs the corresponding test case.
 func TestCoerceBsonM(t *testing.T) {
 	if m, ok := CoerceBsonM(bson.M{"a": 1}); !ok || m["a"] != 1 {
 		t.Fatalf("unexpected bson.M coercion: ok=%v m=%v", ok, m)
@@ -150,6 +208,7 @@ func TestCoerceBsonM(t *testing.T) {
 	}
 }
 
+// TestMarshalObject runs the corresponding test case.
 func TestMarshalObject(t *testing.T) {
 	// Use a normalized value for _id to avoid relying on mgo/bson's Extended JSON wrappers.
 	got, err := MarshalObject(bson.M{"_id": bson.NewObjectId().Hex(), "n": int64(1)})
@@ -166,6 +225,7 @@ func TestMarshalObject(t *testing.T) {
 	}
 }
 
+// TestDocHasOperatorKeysAndCoerceInterfaceSlice runs the corresponding test case.
 func TestDocHasOperatorKeysAndCoerceInterfaceSlice(t *testing.T) {
 	if !DocHasOperatorKeys(bson.M{"$gt": 1}) {
 		t.Fatalf("expected operator keys to be detected")

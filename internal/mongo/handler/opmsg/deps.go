@@ -15,13 +15,13 @@ type DBExecutor interface {
 }
 
 type SQLDoc struct {
-	Doc   bson.M
-	DocID string
+	Doc        bson.M
+	DocID      string
+	FieldOrder []string
 }
 
 type Deps struct {
-	StableFieldOrder bool
-	LogWriteInfo     bool
+	LogWriteInfo bool
 
 	RemoteAddr func(ctx context.Context) string
 
@@ -36,6 +36,7 @@ type Deps struct {
 	LoadSQLDocs           func(ctx context.Context, physical string) ([]bson.M, error)
 	LoadSQLDocsWithIDs    func(ctx context.Context, physical string) ([]SQLDoc, error)
 	LoadSQLDocsWithIDsQry func(ctx context.Context, query string, args ...any) ([]SQLDoc, error)
+	ListCollectionColumns func(ctx context.Context, physical string) ([]string, error)
 
 	EnsureCollectionTable func(ctx context.Context, physical string) error
 	ClearSchemaCache      func(physical string)
@@ -51,7 +52,7 @@ type Deps struct {
 	RefreshTouched func(ctx context.Context)
 
 	NormalizeDocForReply     func(ctx context.Context, doc bson.M) error
-	OrderTopLevelDocForReply func(m bson.M) bson.D
+	OrderTopLevelDocForReply func(m bson.M, fieldOrder []string) bson.D
 
 	IsUndefinedRelation func(err error) bool
 	IsUndefinedSchema   func(err error) bool

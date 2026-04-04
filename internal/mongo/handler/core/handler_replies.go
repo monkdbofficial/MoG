@@ -13,7 +13,9 @@ import (
 	mwire "mog/internal/mongo/wire"
 )
 
-// Reply builders and common admin/handshake documents.
+// newMsg builds an OP_MSG reply for a command response document.
+//
+// Reply builders and common admin/handshake documents live in this file.
 func (h *Handler) newMsg(requestID int32, doc bson.M) ([]byte, error) {
 	bytes, err := bson.Marshal(doc)
 	if err != nil {
@@ -33,6 +35,7 @@ func (h *Handler) newMsg(requestID int32, doc bson.M) ([]byte, error) {
 	return op.Marshal()
 }
 
+// newMsgError is a helper used by the adapter.
 func (h *Handler) newMsgError(requestID int32, code int32, codeName, errmsg string) ([]byte, error) {
 	return h.newMsg(requestID, bson.M{
 		"ok":       0.0,
@@ -42,6 +45,7 @@ func (h *Handler) newMsgError(requestID int32, code int32, codeName, errmsg stri
 	})
 }
 
+// newReply is a helper used by the adapter.
 func (h *Handler) newReply(requestID int32, doc bson.M) ([]byte, error) {
 	bytes, err := bson.Marshal(doc)
 	if err != nil {
@@ -64,6 +68,7 @@ func (h *Handler) newReply(requestID int32, doc bson.M) ([]byte, error) {
 	return op.Marshal()
 }
 
+// newReplyError is a helper used by the adapter.
 func (h *Handler) newReplyError(requestID int32, code int32, codeName, errmsg string) ([]byte, error) {
 	return h.newReply(requestID, bson.M{
 		"ok":       0.0,
@@ -73,6 +78,7 @@ func (h *Handler) newReplyError(requestID int32, code int32, codeName, errmsg st
 	})
 }
 
+// hostInfoDoc is a helper used by the adapter.
 func hostInfoDoc() bson.M {
 	hostname, _ := os.Hostname()
 	return bson.M{
@@ -88,6 +94,7 @@ func hostInfoDoc() bson.M {
 	}
 }
 
+// helloDoc is a helper used by the adapter.
 func helloDoc(authenticated bool) bson.M {
 	doc := bson.M{
 		"ismaster":                     true,
@@ -109,6 +116,7 @@ func helloDoc(authenticated bool) bson.M {
 	return doc
 }
 
+// maybeSpeculativeAuth is a helper used by the adapter.
 func (h *Handler) maybeSpeculativeAuth(cmd bson.M, resp bson.M) error {
 	if h.authenticated || h.scramConv != nil {
 		return nil
@@ -150,6 +158,7 @@ func (h *Handler) maybeSpeculativeAuth(cmd bson.M, resp bson.M) error {
 	return nil
 }
 
+// serverStatusDoc is a helper used by the adapter.
 func serverStatusDoc() bson.M {
 	hostname, _ := os.Hostname()
 	now := time.Now()
@@ -171,6 +180,7 @@ func serverStatusDoc() bson.M {
 	}
 }
 
+// cmdLineOptsDoc is a helper used by the adapter.
 func cmdLineOptsDoc() bson.M {
 	return bson.M{
 		"argv":   []string{},
@@ -179,6 +189,7 @@ func cmdLineOptsDoc() bson.M {
 	}
 }
 
+// payloadFromCommand is a helper used by the adapter.
 func payloadFromCommand(cmd bson.M) (string, error) {
 	payload, ok := cmd["payload"]
 	if !ok {

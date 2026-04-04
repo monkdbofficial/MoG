@@ -12,6 +12,8 @@ import (
 )
 
 // Catalog and backend-introspection helpers.
+
+// dropCollectionTable is a helper used by the adapter.
 func (h *Handler) dropCollectionTable(ctx context.Context, collection string) error {
 	if h.pool == nil {
 		return fmt.Errorf("database pool is not configured")
@@ -27,6 +29,7 @@ func (h *Handler) dropCollectionTable(ctx context.Context, collection string) er
 	return err
 }
 
+// dropDatabase is a helper used by the adapter.
 func (h *Handler) dropDatabase(ctx context.Context, dbName string) error {
 	if h.pool == nil {
 		return nil
@@ -63,6 +66,7 @@ var (
 	physicalNameCache = sync.Map{} // (dbName, collection) -> physical
 )
 
+// physicalCollectionName is a helper used by the adapter.
 func physicalCollectionName(dbName, collection string) (string, error) {
 	if dbName == "" && collection == "" {
 		return "", nil
@@ -93,6 +97,7 @@ func physicalCollectionName(dbName, collection string) (string, error) {
 	return physical, nil
 }
 
+// ensureCatalogTable is a helper used by the adapter.
 func (h *Handler) ensureCatalogTable(ctx context.Context) error {
 	if h.pool == nil {
 		return nil
@@ -151,6 +156,7 @@ func (h *Handler) ensureCatalogTable(ctx context.Context) error {
 	return nil
 }
 
+// catalogUpsert is a helper used by the adapter.
 func (h *Handler) catalogUpsert(ctx context.Context, dbName, collection string) error {
 	if h.pool == nil {
 		return nil
@@ -240,6 +246,7 @@ func (h *Handler) catalogUpsert(ctx context.Context, dbName, collection string) 
 	return nil
 }
 
+// catalogRemoveCollection is a helper used by the adapter.
 func (h *Handler) catalogRemoveCollection(ctx context.Context, dbName, collection string) error {
 	if h.pool == nil {
 		return nil
@@ -262,6 +269,7 @@ func (h *Handler) catalogRemoveCollection(ctx context.Context, dbName, collectio
 	return nil
 }
 
+// catalogRemoveDatabase is a helper used by the adapter.
 func (h *Handler) catalogRemoveDatabase(ctx context.Context, dbName string) error {
 	if h.pool == nil {
 		return nil
@@ -284,6 +292,7 @@ func (h *Handler) catalogRemoveDatabase(ctx context.Context, dbName string) erro
 	return nil
 }
 
+// catalogListDatabases is a helper used by the adapter.
 func (h *Handler) catalogListDatabases(ctx context.Context) ([]string, error) {
 	if h.pool == nil {
 		return []string{"admin"}, nil
@@ -400,15 +409,18 @@ func (h *Handler) catalogListDatabases(ctx context.Context) ([]string, error) {
 	return []string{"admin"}, nil
 }
 
+// relationalWhereAndArgs is a helper used by the adapter.
 func (h *Handler) relationalWhereAndArgs(ctx context.Context, physical string, filter bson.M) (string, []interface{}, error) {
 	// Relational/promotion mode removed. All pure-SQL filtering is evaluated in-memory over KV-reconstructed documents.
 	return "", nil, fmt.Errorf("relational mode is not supported")
 }
 
+// relationalTagsCondition is a helper used by the adapter.
 func relationalTagsCondition(v interface{}, argCount *int, physical string) (string, []interface{}, error) {
 	return "", nil, fmt.Errorf("tags table is not supported")
 }
 
+// catalogListCollections is a helper used by the adapter.
 func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]string, error) {
 	if h.pool == nil {
 		return []string{}, nil
@@ -430,7 +442,7 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 					continue
 				}
 				coll := strings.TrimPrefix(name, prefix)
-				if coll == "" || coll == catalogCollection || seen[coll] {
+				if coll == "" || coll == catalogCollection || shared.IsInternalCollectionName(coll) || seen[coll] {
 					continue
 				}
 				seen[coll] = true
@@ -453,7 +465,7 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 					continue
 				}
 				coll := strings.TrimPrefix(name, prefix)
-				if coll == "" || coll == catalogCollection {
+				if coll == "" || coll == catalogCollection || shared.IsInternalCollectionName(coll) {
 					continue
 				}
 				existing[coll] = true
@@ -502,6 +514,9 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 			if coll == "" || coll == catalogCollection {
 				continue
 			}
+			if shared.IsInternalCollectionName(coll) {
+				continue
+			}
 			if len(existing) > 0 && !existing[coll] {
 				continue
 			}
@@ -531,6 +546,9 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 					if coll == "" || coll == catalogCollection || seen[coll] {
 						continue
 					}
+					if shared.IsInternalCollectionName(coll) {
+						continue
+					}
 					if len(existing) > 0 && !existing[coll] {
 						continue
 					}
@@ -549,7 +567,7 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 					continue
 				}
 				coll := strings.TrimPrefix(name, prefix)
-				if coll == "" || coll == catalogCollection || seen[coll] {
+				if coll == "" || coll == catalogCollection || shared.IsInternalCollectionName(coll) || seen[coll] {
 					continue
 				}
 				seen[coll] = true
@@ -560,7 +578,7 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 		if len(out) > 0 || attempt == 1 {
 			// Merge in process-local catalog cache (helps when SQL catalog is missing/broken).
 			for _, coll := range globalCatalogCache.listCollections(dbName) {
-				if coll != "" && coll != catalogCollection && !seen[coll] {
+				if coll != "" && coll != catalogCollection && !shared.IsInternalCollectionName(coll) && !seen[coll] {
 					seen[coll] = true
 					out = append(out, coll)
 				}
@@ -572,6 +590,7 @@ func (h *Handler) catalogListCollections(ctx context.Context, dbName string) ([]
 	return []string{}, nil
 }
 
+// catalogRebuildFromTables is a helper used by the adapter.
 func (h *Handler) catalogRebuildFromTables(ctx context.Context) error {
 	if h.pool == nil {
 		return nil
@@ -589,10 +608,12 @@ func (h *Handler) catalogRebuildFromTables(ctx context.Context) error {
 	return h.catalogBackfillFromTables(ctx)
 }
 
+// applyRelationalUpdate is a helper used by the adapter.
 func (h *Handler) applyRelationalUpdate(ctx context.Context, exec DBExecutor, physical string, filter bson.M, update bson.M, multi bool) (matched int, modified int, err error) {
 	return 0, 0, fmt.Errorf("relational mode is not supported")
 }
 
+// catalogBackfillFromTables is a helper used by the adapter.
 func (h *Handler) catalogBackfillFromTables(ctx context.Context) error {
 	if h.pool == nil {
 		return nil
@@ -612,7 +633,7 @@ func (h *Handler) catalogBackfillFromTables(ctx context.Context) error {
 		}
 		dbName := parts[0]
 		coll := parts[1]
-		if coll == "" || coll == catalogCollection {
+		if coll == "" || coll == catalogCollection || shared.IsInternalCollectionName(coll) {
 			continue
 		}
 		_ = h.catalogUpsert(ctx, dbName, coll)
@@ -620,6 +641,7 @@ func (h *Handler) catalogBackfillFromTables(ctx context.Context) error {
 	return nil
 }
 
+// listDocTables is a helper used by the adapter.
 func (h *Handler) listDocTables(ctx context.Context) ([]string, error) {
 	if h.pool == nil {
 		return nil, nil

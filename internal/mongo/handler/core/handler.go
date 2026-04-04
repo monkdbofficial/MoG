@@ -35,20 +35,19 @@ type Handler struct {
 
 	storeRawMongoJSON bool
 	logWriteInfo      bool
-	stableFieldOrder  bool
 
-	blobTable      string
-	blobHTTPBase   string
-	blobShards     int
-	blobMinBytes   int
-	blobMetaEnable bool
-	blobMetaTable  string
-	blobInlineReads   bool
+	blobTable          string
+	blobHTTPBase       string
+	blobShards         int
+	blobMinBytes       int
+	blobMetaEnable     bool
+	blobMetaTable      string
+	blobInlineReads    bool
 	blobInlineMaxBytes int
-	blobInlineStrict  bool
-	blobHTTPTransport http.RoundTripper
-	blobOnce       sync.Once
-	blobInitErr    error
+	blobInlineStrict   bool
+	blobHTTPTransport  http.RoundTripper
+	blobOnce           sync.Once
+	blobInitErr        error
 
 	// scram conversation
 	scram         *ScramSha256
@@ -64,21 +63,21 @@ func NewHandler(pool *pgxpool.Pool, t *translator.Translator, scram *ScramSha256
 		scram:             scram,
 		touched:           map[string]struct{}{},
 		storeRawMongoJSON: envBool("MOG_STORE_RAW_MONGO_JSON", false),
-		stableFieldOrder:  envBool("MOG_STABLE_FIELD_ORDER", false),
 		// Minimal info-level write logging is opt-in to avoid performance overhead under high QPS.
-		logWriteInfo: envBool("MOG_INFO_LOG_WRITES", false),
-		blobTable:    strings.TrimSpace(os.Getenv("MOG_BLOB_TABLE")),
-		blobHTTPBase: strings.TrimSpace(envString("MOG_BLOB_HTTP_BASE", "http://localhost:6000")),
-		blobShards:   envInt("MOG_BLOB_SHARDS", 3),
-		blobMinBytes: envInt("MOG_BLOB_MIN_BYTES", 256),
-		blobMetaEnable: envBool("MOG_BLOB_METADATA", false),
-		blobMetaTable:  strings.TrimSpace(envString("MOG_BLOB_METADATA_TABLE", "doc.blob_metadata")),
+		logWriteInfo:       envBool("MOG_INFO_LOG_WRITES", false),
+		blobTable:          strings.TrimSpace(os.Getenv("MOG_BLOB_TABLE")),
+		blobHTTPBase:       strings.TrimSpace(envString("MOG_BLOB_HTTP_BASE", "http://localhost:6000")),
+		blobShards:         envInt("MOG_BLOB_SHARDS", 3),
+		blobMinBytes:       envInt("MOG_BLOB_MIN_BYTES", 256),
+		blobMetaEnable:     envBool("MOG_BLOB_METADATA", false),
+		blobMetaTable:      strings.TrimSpace(envString("MOG_BLOB_METADATA_TABLE", "doc.blob_metadata")),
 		blobInlineReads:    envBool("MOG_BLOB_INLINE_READS", false),
 		blobInlineMaxBytes: envInt("MOG_BLOB_INLINE_MAX_BYTES", 1024*1024),
 		blobInlineStrict:   envBool("MOG_BLOB_INLINE_STRICT", false),
 	}
 }
 
+// envString is a helper used by the adapter.
 func envString(key, def string) string {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
@@ -87,6 +86,7 @@ func envString(key, def string) string {
 	return v
 }
 
+// envInt is a helper used by the adapter.
 func envInt(key string, def int) int {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
@@ -98,6 +98,7 @@ func envInt(key string, def int) int {
 	return def
 }
 
+// envBool is a helper used by the adapter.
 func envBool(key string, def bool) bool {
 	v := strings.TrimSpace(os.Getenv(key))
 	if v == "" {
@@ -113,14 +114,17 @@ func envBool(key string, def bool) bool {
 	}
 }
 
+// blobEnabled is a helper used by the adapter.
 func (h *Handler) blobEnabled() bool {
 	return strings.TrimSpace(h.blobTable) != ""
 }
 
+// httpTimeout is a helper used by the adapter.
 func (h *Handler) httpTimeout() time.Duration {
 	return 30 * time.Second
 }
 
+// db is a helper used by the adapter.
 func (h *Handler) db() DBExecutor {
 	if h.tx != nil {
 		return h.tx
@@ -128,6 +132,7 @@ func (h *Handler) db() DBExecutor {
 	return h.pool
 }
 
+// markTouched is a helper used by the adapter.
 func (h *Handler) markTouched(physical string) {
 	if physical == "" {
 		return
@@ -138,6 +143,7 @@ func (h *Handler) markTouched(physical string) {
 	h.touched[physical] = struct{}{}
 }
 
+// refreshTouched is a helper used by the adapter.
 func (h *Handler) refreshTouched(ctx context.Context) {
 	if h.pool == nil || h.tx != nil || len(h.touched) == 0 {
 		return
@@ -149,6 +155,7 @@ func (h *Handler) refreshTouched(ctx context.Context) {
 	h.touched = map[string]struct{}{}
 }
 
+// refreshCollection is a helper used by the adapter.
 func (h *Handler) refreshCollection(ctx context.Context, physical string) {
 	if h.pool == nil || physical == "" {
 		return

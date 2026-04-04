@@ -11,6 +11,7 @@ import (
 	"go.mongodb.org/mongo-driver/mongo/readpref"
 )
 
+// TestIntegration_Connection runs the corresponding test case.
 func TestIntegration_Connection(t *testing.T) {
 	if os.Getenv("RUN_INTEGRATION") == "" {
 		t.Skip("set RUN_INTEGRATION=1 to run integration test (requires MoG running)")

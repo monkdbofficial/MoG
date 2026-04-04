@@ -9,6 +9,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// TestApplyUpdate_Set_DotPathCreates runs the corresponding test case.
 func TestApplyUpdate_Set_DotPathCreates(t *testing.T) {
 	doc := bson.M{}
 	update := bson.M{"$set": bson.M{"a.b.c.d": 10}}
@@ -22,6 +23,7 @@ func TestApplyUpdate_Set_DotPathCreates(t *testing.T) {
 	}
 }
 
+// TestApplyUpdate_Set_NullOverwritten runs the corresponding test case.
 func TestApplyUpdate_Set_NullOverwritten(t *testing.T) {
 	doc := bson.M{"address": nil}
 	update := bson.M{"$set": bson.M{"address.city": "blr"}}
@@ -32,6 +34,7 @@ func TestApplyUpdate_Set_NullOverwritten(t *testing.T) {
 	}
 }
 
+// TestApplyUpdate_Inc_MissingTreatZero runs the corresponding test case.
 func TestApplyUpdate_Inc_MissingTreatZero(t *testing.T) {
 	doc := bson.M{}
 	update := bson.M{"$inc": bson.M{"counter.value": 5}}
@@ -42,6 +45,7 @@ func TestApplyUpdate_Inc_MissingTreatZero(t *testing.T) {
 	}
 }
 
+// TestApplyUpdate_Inc_PreservesInt32 runs the corresponding test case.
 func TestApplyUpdate_Inc_PreservesInt32(t *testing.T) {
 	doc := bson.M{"age": int32(25)}
 	update := bson.M{"$inc": bson.M{"age": int32(5)}}
@@ -53,6 +57,7 @@ func TestApplyUpdate_Inc_PreservesInt32(t *testing.T) {
 	}
 }
 
+// TestApplyUpdate_Push_NestedCreatesArray runs the corresponding test case.
 func TestApplyUpdate_Push_NestedCreatesArray(t *testing.T) {
 	doc := bson.M{}
 	update := bson.M{"$push": bson.M{"arr.items": bson.M{"x": 1}}}
@@ -69,6 +74,7 @@ func TestApplyUpdate_Push_NestedCreatesArray(t *testing.T) {
 	}
 }
 
+// TestApplyUpdate_Unset_NestedSafe runs the corresponding test case.
 func TestApplyUpdate_Unset_NestedSafe(t *testing.T) {
 	doc := bson.M{"a": bson.M{"b": 1, "c": 2}}
 	update := bson.M{"$unset": bson.M{"a.b": ""}}
@@ -82,6 +88,7 @@ func TestApplyUpdate_Unset_NestedSafe(t *testing.T) {
 	}
 }
 
+// TestApplyUpdate_Concurrent_NoMutation runs the corresponding test case.
 func TestApplyUpdate_Concurrent_NoMutation(t *testing.T) {
 	base := bson.M{"counter": bson.M{"value": 0}}
 	update := bson.M{"$inc": bson.M{"counter.value": 1}}
@@ -101,6 +108,7 @@ func TestApplyUpdate_Concurrent_NoMutation(t *testing.T) {
 	}
 }
 
+// TestBuildUpsertBaseDoc_IgnoresOperatorFilters runs the corresponding test case.
 func TestBuildUpsertBaseDoc_IgnoresOperatorFilters(t *testing.T) {
 	filter := bson.M{
 		"a.b": 1,

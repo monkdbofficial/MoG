@@ -26,6 +26,7 @@ type uniqueIndexRegistry struct {
 
 var globalUniqueIndexes = &uniqueIndexRegistry{uniques: map[string][]uniqueIndexDef{}}
 
+// list is a helper used by the adapter.
 func (r *uniqueIndexRegistry) list(physical string) []uniqueIndexDef {
 	if r == nil || physical == "" {
 		return nil
@@ -36,6 +37,7 @@ func (r *uniqueIndexRegistry) list(physical string) []uniqueIndexDef {
 	return append([]uniqueIndexDef(nil), src...)
 }
 
+// add is a helper used by the adapter.
 func (r *uniqueIndexRegistry) add(physical string, defs []uniqueIndexDef) {
 	if r == nil || physical == "" || len(defs) == 0 {
 		return
@@ -45,6 +47,7 @@ func (r *uniqueIndexRegistry) add(physical string, defs []uniqueIndexDef) {
 	r.mu.Unlock()
 }
 
+// clear is a helper used by the adapter.
 func (r *uniqueIndexRegistry) clear(physical string) {
 	if r == nil || physical == "" {
 		return
@@ -54,6 +57,7 @@ func (r *uniqueIndexRegistry) clear(physical string) {
 	r.mu.Unlock()
 }
 
+// clearDB is a helper used by the adapter.
 func (r *uniqueIndexRegistry) clearDB(dbName string) {
 	if r == nil || dbName == "" {
 		return
@@ -68,22 +72,27 @@ func (r *uniqueIndexRegistry) clearDB(dbName string) {
 	r.mu.Unlock()
 }
 
+// listUniqueIndexes is a helper used by the adapter.
 func (h *Handler) listUniqueIndexes(physical string) []uniqueIndexDef {
 	return globalUniqueIndexes.list(physical)
 }
 
+// addUniqueIndexes is a helper used by the adapter.
 func (h *Handler) addUniqueIndexes(physical string, defs []uniqueIndexDef) {
 	globalUniqueIndexes.add(physical, defs)
 }
 
+// clearUniqueIndexes is a helper used by the adapter.
 func (h *Handler) clearUniqueIndexes(physical string) {
 	globalUniqueIndexes.clear(physical)
 }
 
+// clearUniqueIndexesForDB is a helper used by the adapter.
 func (h *Handler) clearUniqueIndexesForDB(dbName string) {
 	globalUniqueIndexes.clearDB(dbName)
 }
 
+// checkUniqueViolation is a helper used by the adapter.
 func (h *Handler) checkUniqueViolation(ctx context.Context, physical string, docID string, doc bson.M, excludeDocID string) (dupKeyMsg string, indexName string, violated bool) {
 	if physical == "" || doc == nil {
 		return "", "", false
@@ -155,6 +164,7 @@ func (h *Handler) checkUniqueViolation(ctx context.Context, physical string, doc
 	return "", "", false
 }
 
+// uniqueIndexTupleIsScalar is a helper used by the adapter.
 func uniqueIndexTupleIsScalar(tuple []interface{}) bool {
 	for _, v := range tuple {
 		if v == nil {
@@ -170,6 +180,7 @@ func uniqueIndexTupleIsScalar(tuple []interface{}) bool {
 	return true
 }
 
+// uniqueKeyExistsSQL is a helper used by the adapter.
 func (h *Handler) uniqueKeyExistsSQL(ctx context.Context, exec DBExecutor, physical string, fields []string, tuple []interface{}, excludeDocID string, docID string) (bool, error) {
 	if exec == nil || physical == "" || len(fields) == 0 || len(fields) != len(tuple) {
 		return false, fmt.Errorf("invalid unique key query args")
@@ -211,6 +222,7 @@ func (h *Handler) uniqueKeyExistsSQL(ctx context.Context, exec DBExecutor, physi
 	return false, err
 }
 
+// uniqueIndexKeyTuples is a helper used by the adapter.
 func uniqueIndexKeyTuples(doc bson.M, fields []string) ([][]interface{}, bool) {
 	if doc == nil || len(fields) == 0 {
 		return nil, false
@@ -260,6 +272,7 @@ func uniqueIndexKeyTuples(doc bson.M, fields []string) ([][]interface{}, bool) {
 	return out, true
 }
 
+// explodeUniqueIndexValues is a helper used by the adapter.
 func explodeUniqueIndexValues(v interface{}) []interface{} {
 	if v == nil {
 		return nil
@@ -277,6 +290,7 @@ func explodeUniqueIndexValues(v interface{}) []interface{} {
 	return []interface{}{v}
 }
 
+// uniqueIndexKeyTuplesIntersect is a helper used by the adapter.
 func uniqueIndexKeyTuplesIntersect(a, b [][]interface{}) bool {
 	for _, ka := range a {
 		for _, kb := range b {
@@ -288,6 +302,7 @@ func uniqueIndexKeyTuplesIntersect(a, b [][]interface{}) bool {
 	return false
 }
 
+// uniqueIndexKeyTupleEquals is a helper used by the adapter.
 func uniqueIndexKeyTupleEquals(a, b []interface{}) bool {
 	if len(a) != len(b) {
 		return false

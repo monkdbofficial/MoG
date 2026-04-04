@@ -16,6 +16,7 @@ import (
 	"mog/internal/translator"
 )
 
+// opMsgRoundTrip is a helper used by the adapter.
 func opMsgRoundTrip(t *testing.T, h *Handler, cmd bson.M) bson.M {
 	t.Helper()
 
@@ -73,6 +74,7 @@ func opMsgRoundTrip(t *testing.T, h *Handler, cmd bson.M) bson.M {
 	return out
 }
 
+// TestOpMsgPingOK runs the corresponding test case.
 func TestOpMsgPingOK(t *testing.T) {
 	scram, _ := NewScramSha256("u", "p")
 	h := NewHandler(nil, translator.New(), scram)
@@ -82,6 +84,7 @@ func TestOpMsgPingOK(t *testing.T) {
 	}
 }
 
+// TestOpMsgUnsupportedReturnsCommandNotFound runs the corresponding test case.
 func TestOpMsgUnsupportedReturnsCommandNotFound(t *testing.T) {
 	scram, _ := NewScramSha256("u", "p")
 	h := NewHandler(nil, translator.New(), scram)
@@ -94,6 +97,7 @@ func TestOpMsgUnsupportedReturnsCommandNotFound(t *testing.T) {
 	}
 }
 
+// TestOpMsgConnectionStatusShowPrivileges runs the corresponding test case.
 func TestOpMsgConnectionStatusShowPrivileges(t *testing.T) {
 	scram, _ := NewScramSha256("u", "p")
 	h := NewHandler(nil, translator.New(), scram)
@@ -111,6 +115,7 @@ func TestOpMsgConnectionStatusShowPrivileges(t *testing.T) {
 	}
 }
 
+// TestOpMsgHostInfoOK runs the corresponding test case.
 func TestOpMsgHostInfoOK(t *testing.T) {
 	scram, _ := NewScramSha256("u", "p")
 	h := NewHandler(nil, translator.New(), scram)
@@ -128,6 +133,7 @@ func TestOpMsgHostInfoOK(t *testing.T) {
 	}
 }
 
+// TestOpMsgHelloWireVersion runs the corresponding test case.
 func TestOpMsgHelloWireVersion(t *testing.T) {
 	scram, _ := NewScramSha256("u", "p")
 	h := NewHandler(nil, translator.New(), scram)
@@ -151,6 +157,7 @@ func TestOpMsgHelloWireVersion(t *testing.T) {
 	}
 }
 
+// TestOpMsgCollStatsOK runs the corresponding test case.
 func TestOpMsgCollStatsOK(t *testing.T) {
 	scram, _ := NewScramSha256("u", "p")
 	h := NewHandler(nil, translator.New(), scram)
@@ -163,6 +170,7 @@ func TestOpMsgCollStatsOK(t *testing.T) {
 	}
 }
 
+// TestOpMsgListIndexesOK runs the corresponding test case.
 func TestOpMsgListIndexesOK(t *testing.T) {
 	scram, _ := NewScramSha256("u", "p")
 	h := NewHandler(nil, translator.New(), scram)
@@ -179,6 +187,7 @@ func TestOpMsgListIndexesOK(t *testing.T) {
 	}
 }
 
+// TestPhysicalCollectionName runs the corresponding test case.
 func TestPhysicalCollectionName(t *testing.T) {
 	got, err := physicalCollectionName("test_monk", "test")
 	if err != nil {
@@ -189,6 +198,7 @@ func TestPhysicalCollectionName(t *testing.T) {
 	}
 }
 
+// TestCoerceBsonM runs the corresponding test case.
 func TestCoerceBsonM(t *testing.T) {
 	m, ok := shared.CoerceBsonM(map[string]interface{}{"a": 1})
 	if !ok || m["a"] != 1 {
@@ -205,19 +215,23 @@ type recordingExec struct {
 	execs []string
 }
 
+// Query is a helper used by the adapter.
 func (r *recordingExec) Query(ctx context.Context, sql string, args ...interface{}) (pgx.Rows, error) {
 	return nil, errors.New("Query not implemented in recordingExec")
 }
 
+// QueryRow is a helper used by the adapter.
 func (r *recordingExec) QueryRow(ctx context.Context, sql string, args ...interface{}) pgx.Row {
 	return nil
 }
 
+// Exec is a helper used by the adapter.
 func (r *recordingExec) Exec(ctx context.Context, sql string, args ...interface{}) (pgconn.CommandTag, error) {
 	r.execs = append(r.execs, sql)
 	return pgconn.CommandTag{}, nil
 }
 
+// TestEnsureCollectionTableExec_UpgradesDataColumnWhenCacheInitialized runs the corresponding test case.
 func TestEnsureCollectionTableExec_UpgradesDataColumnWhenCacheInitialized(t *testing.T) {
 	scram, _ := NewScramSha256("u", "p")
 	h := NewHandler(nil, translator.New(), scram)
@@ -241,5 +255,38 @@ func TestEnsureCollectionTableExec_UpgradesDataColumnWhenCacheInitialized(t *tes
 	}
 	if !h.schemaCache().hasColumn(physical, "data") {
 		t.Fatalf("expected schema cache to include data column")
+	}
+}
+
+// TestEnsureCollectionTableWithColumnsExec_CreatesVectorColumnInline runs the corresponding test case.
+func TestEnsureCollectionTableWithColumnsExec_CreatesVectorColumnInline(t *testing.T) {
+	scram, _ := NewScramSha256("u", "p")
+	h := NewHandler(nil, translator.New(), scram)
+	h.storeRawMongoJSON = true
+
+	physical := "test_vector_inline"
+	defer h.schemaCache().clear(physical)
+
+	exec := &recordingExec{}
+	err := h.ensureCollectionTableWithColumnsExec(context.Background(), exec, physical, map[string]string{
+		"title":     "TEXT",
+		"embedding": "FLOAT_VECTOR(4)",
+	})
+	if err != nil {
+		t.Fatalf("ensureCollectionTableWithColumnsExec: %v", err)
+	}
+	if len(exec.execs) == 0 {
+		t.Fatalf("expected exec calls")
+	}
+	want := "CREATE TABLE IF NOT EXISTS doc." + physical + " (id TEXT PRIMARY KEY, data OBJECT(DYNAMIC), embedding FLOAT_VECTOR(4), title TEXT)"
+	found := false
+	for _, sql := range exec.execs {
+		if sql == want {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected create statement %q in %#v", want, exec.execs)
 	}
 }

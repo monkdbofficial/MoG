@@ -10,6 +10,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// TestApplyPipeline_GroupAvgSortLimit runs the corresponding test case.
 func TestApplyPipeline_GroupAvgSortLimit(t *testing.T) {
 	docs := []bson.M{
 		{"age": 25, "score": 10.0},
@@ -38,6 +39,7 @@ func TestApplyPipeline_GroupAvgSortLimit(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_ProjectMultiply runs the corresponding test case.
 func TestApplyPipeline_ProjectMultiply(t *testing.T) {
 	docs := []bson.M{
 		{"name": "a", "score": 2.0},
@@ -58,6 +60,7 @@ func TestApplyPipeline_ProjectMultiply(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_AddFields_DatePartsAndArithmetic runs the corresponding test case.
 func TestApplyPipeline_AddFields_DatePartsAndArithmetic(t *testing.T) {
 	t0 := time.Date(2024, time.March, 2, 3, 4, 5, 6*1_000_000, time.UTC)
 	docs := []bson.M{
@@ -94,6 +97,7 @@ func TestApplyPipeline_AddFields_DatePartsAndArithmetic(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_ProjectSize runs the corresponding test case.
 func TestApplyPipeline_ProjectSize(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "users": []interface{}{1, 2, 3}},
@@ -127,6 +131,7 @@ func TestApplyPipeline_ProjectSize(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_UnsetStage_StringAndArray runs the corresponding test case.
 func TestApplyPipeline_UnsetStage_StringAndArray(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "a": 1, "nested": bson.M{"b": 2, "c": 3}},
@@ -166,6 +171,7 @@ func TestApplyPipeline_UnsetStage_StringAndArray(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_GroupConstantIDCount runs the corresponding test case.
 func TestApplyPipeline_GroupConstantIDCount(t *testing.T) {
 	docs := []bson.M{
 		{"age": 1},
@@ -188,6 +194,7 @@ func TestApplyPipeline_GroupConstantIDCount(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_CountStage runs the corresponding test case.
 func TestApplyPipeline_CountStage(t *testing.T) {
 	docs := []bson.M{
 		{"a": 1},
@@ -202,6 +209,21 @@ func TestApplyPipeline_CountStage(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_VectorSearchRequiresSQLPushdown runs the corresponding test case.
+func TestApplyPipeline_VectorSearchRequiresSQLPushdown(t *testing.T) {
+	_, err := ApplyPipeline([]bson.M{{"_id": 1, "embedding": []float64{0.1, 0.2}}}, []bson.M{{
+		"$vectorSearch": bson.M{
+			"path":        "embedding",
+			"queryVector": []float64{0.1, 0.2},
+			"limit":       1,
+		},
+	}})
+	if err == nil || !strings.Contains(err.Error(), "requires SQL pushdown") {
+		t.Fatalf("expected SQL pushdown error, got %v", err)
+	}
+}
+
+// TestApplyPipeline_Lookup_NestedAndMissing runs the corresponding test case.
 func TestApplyPipeline_Lookup_NestedAndMissing(t *testing.T) {
 	base := []bson.M{
 		{"_id": 1, "address": bson.M{"city": "NY"}},
@@ -244,6 +266,7 @@ func TestApplyPipeline_Lookup_NestedAndMissing(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_Lookup_ArrayLocalField runs the corresponding test case.
 func TestApplyPipeline_Lookup_ArrayLocalField(t *testing.T) {
 	base := []bson.M{
 		{"_id": 1, "tags": []interface{}{"a", "b"}},
@@ -270,6 +293,98 @@ func TestApplyPipeline_Lookup_ArrayLocalField(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_Lookup_PipelineForm_WithLetAndExpr runs the corresponding test case.
+func TestApplyPipeline_Lookup_PipelineForm_WithLetAndExpr(t *testing.T) {
+	users := []bson.M{
+		{"_id": "u1", "user_id": 1, "name": "Alice", "manager_id": nil},
+		{"_id": "u2", "user_id": 2, "name": "Bob", "manager_id": 1},
+		{"_id": "u3", "user_id": 3, "name": "Cara", "manager_id": 1},
+	}
+
+	pipeline := []bson.M{
+		{"$lookup": bson.M{
+			"from": "users",
+			"let":  bson.M{"mgr_id": "$manager_id"},
+			"pipeline": []interface{}{
+				bson.M{"$match": bson.M{"$expr": bson.M{"$eq": []interface{}{"$user_id", "$$mgr_id"}}}},
+				bson.M{"$project": bson.M{"_id": 0, "user_id": 1, "name": 1, "mgr": "$$mgr_id"}},
+			},
+			"as": "manager",
+		}},
+	}
+
+	out, err := ApplyPipelineWithLookup(users, pipeline, func(from string) ([]bson.M, error) {
+		if from != "users" {
+			return nil, fmt.Errorf("unexpected from: %s", from)
+		}
+		return users, nil
+	})
+	if err != nil {
+		t.Fatalf("ApplyPipelineWithLookup err: %v", err)
+	}
+
+	// CEO has no manager.
+	if got := out[0]["manager"].([]bson.M); len(got) != 0 {
+		t.Fatalf("expected empty manager, got %#v", got)
+	}
+
+	// Bob's manager is Alice.
+	got := out[1]["manager"].([]bson.M)
+	if len(got) != 1 || got[0]["user_id"] != 1 || got[0]["name"] != "Alice" || got[0]["mgr"] != 1 {
+		t.Fatalf("unexpected manager: %#v", got)
+	}
+}
+
+// TestApplyPipeline_BucketAuto_Basic runs the corresponding test case.
+func TestApplyPipeline_BucketAuto_Basic(t *testing.T) {
+	docs := []bson.M{
+		{"_id": 1, "n": 10},
+		{"_id": 2, "n": 20},
+		{"_id": 3, "n": 30},
+		{"_id": 4, "n": 40},
+		{"_id": 5, "n": 50},
+	}
+
+	out, err := ApplyPipeline(docs, []bson.M{{
+		"$bucketAuto": bson.M{
+			"groupBy": "$n",
+			"buckets": 3,
+		},
+	}})
+	if err != nil {
+		t.Fatalf("ApplyPipeline err: %v", err)
+	}
+	if len(out) != 3 {
+		t.Fatalf("expected 3 buckets, got %d: %#v", len(out), out)
+	}
+	if out[0]["count"].(int64)+out[1]["count"].(int64)+out[2]["count"].(int64) != int64(len(docs)) {
+		t.Fatalf("expected counts to sum to %d, got %#v", len(docs), out)
+	}
+}
+
+// TestApplyPipeline_CollStats_Placeholder runs the corresponding test case.
+func TestApplyPipeline_CollStats_Placeholder(t *testing.T) {
+	out, err := ApplyPipeline([]bson.M{{"_id": 1}}, []bson.M{{
+		"$collStats": bson.M{
+			"latencyStats": bson.M{"histograms": true},
+			"storageStats": bson.M{},
+		},
+	}})
+	if err != nil {
+		t.Fatalf("ApplyPipeline err: %v", err)
+	}
+	if len(out) != 1 {
+		t.Fatalf("expected 1 doc, got %d: %#v", len(out), out)
+	}
+	if _, ok := out[0]["latencyStats"].(bson.M); !ok {
+		t.Fatalf("expected latencyStats doc, got %#v", out[0]["latencyStats"])
+	}
+	if _, ok := out[0]["storageStats"].(bson.M); !ok {
+		t.Fatalf("expected storageStats doc, got %#v", out[0]["storageStats"])
+	}
+}
+
+// TestApplyPipeline_Unwind_Simple runs the corresponding test case.
 func TestApplyPipeline_Unwind_Simple(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "orders": []interface{}{bson.M{"id": 10}, bson.M{"id": 11}}},
@@ -289,6 +404,7 @@ func TestApplyPipeline_Unwind_Simple(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_Unwind_PreserveNullAndEmpty runs the corresponding test case.
 func TestApplyPipeline_Unwind_PreserveNullAndEmpty(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1},                            // missing
@@ -309,6 +425,7 @@ func TestApplyPipeline_Unwind_PreserveNullAndEmpty(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_Unwind_NestedPath runs the corresponding test case.
 func TestApplyPipeline_Unwind_NestedPath(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "orders": bson.M{"items": []interface{}{"a", "b"}}},
@@ -330,6 +447,7 @@ func TestApplyPipeline_Unwind_NestedPath(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_Unwind_TypedSlices runs the corresponding test case.
 func TestApplyPipeline_Unwind_TypedSlices(t *testing.T) {
 	t.Run("slice of bson.M", func(t *testing.T) {
 		docs := []bson.M{
@@ -387,6 +505,7 @@ func TestApplyPipeline_Unwind_TypedSlices(t *testing.T) {
 	})
 }
 
+// TestApplyPipeline_AddFields_FieldRef_NestedAndMissing runs the corresponding test case.
 func TestApplyPipeline_AddFields_FieldRef_NestedAndMissing(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "name": "a", "address": bson.M{"city": "NY"}},
@@ -428,6 +547,7 @@ func TestApplyPipeline_AddFields_FieldRef_NestedAndMissing(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_AddFields_Size runs the corresponding test case.
 func TestApplyPipeline_AddFields_Size(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "arr": []interface{}{1, 2, 3}},
@@ -469,6 +589,7 @@ func TestApplyPipeline_AddFields_Size(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_AddFields_CondIsArraySize runs the corresponding test case.
 func TestApplyPipeline_AddFields_CondIsArraySize(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "orders": bson.M{"items": []interface{}{"a", "b"}}},
@@ -508,6 +629,7 @@ func TestApplyPipeline_AddFields_CondIsArraySize(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_SetStage_AliasOfAddFields runs the corresponding test case.
 func TestApplyPipeline_SetStage_AliasOfAddFields(t *testing.T) {
 	docs := []bson.M{
 		{"city": "NY"},
@@ -534,6 +656,7 @@ func TestApplyPipeline_SetStage_AliasOfAddFields(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_Match_NestedComparison runs the corresponding test case.
 func TestApplyPipeline_Match_NestedComparison(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "orders": bson.M{"amount": 300}},
@@ -554,6 +677,7 @@ func TestApplyPipeline_Match_NestedComparison(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_AddFieldsThenMatch_Comparison runs the corresponding test case.
 func TestApplyPipeline_AddFieldsThenMatch_Comparison(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "orders": bson.M{"amount": 300}},
@@ -575,6 +699,7 @@ func TestApplyPipeline_AddFieldsThenMatch_Comparison(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_Group_AddToSet runs the corresponding test case.
 func TestApplyPipeline_Group_AddToSet(t *testing.T) {
 	docs := []bson.M{
 		{"user_id": 1},
@@ -608,6 +733,7 @@ func TestApplyPipeline_Group_AddToSet(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_Sample runs the corresponding test case.
 func TestApplyPipeline_Sample(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1},
@@ -644,6 +770,7 @@ func TestApplyPipeline_Sample(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_ProjectYear runs the corresponding test case.
 func TestApplyPipeline_ProjectYear(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "created_at": time.Date(2026, 3, 28, 10, 0, 0, 0, time.UTC)},
@@ -671,6 +798,7 @@ func TestApplyPipeline_ProjectYear(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_Facet runs the corresponding test case.
 func TestApplyPipeline_Facet(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "age": 30, "salary": 10.0, "created_at": time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)},
@@ -722,6 +850,7 @@ func TestApplyPipeline_Facet(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_SetWindowFields_AvgAndRank runs the corresponding test case.
 func TestApplyPipeline_SetWindowFields_AvgAndRank(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "age": 30, "salary": 20.0},
@@ -773,6 +902,7 @@ func TestApplyPipeline_SetWindowFields_AvgAndRank(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_GraphLookup_ManagerChain runs the corresponding test case.
 func TestApplyPipeline_GraphLookup_ManagerChain(t *testing.T) {
 	base := []bson.M{
 		{"_id": 10, "manager_id": 3},
@@ -821,6 +951,133 @@ func TestApplyPipeline_GraphLookup_ManagerChain(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_GraphLookup_DepthAndRestrict runs the corresponding test case.
+func TestApplyPipeline_GraphLookup_DepthAndRestrict(t *testing.T) {
+	base := []bson.M{
+		{"_id": 10, "manager_id": 3},
+	}
+	foreign := []bson.M{
+		{"user_id": 1, "manager_id": nil, "active": false},
+		{"user_id": 2, "manager_id": 1, "active": false},
+		{"user_id": 3, "manager_id": 2, "active": true},
+	}
+	resolver := func(from string) ([]bson.M, error) {
+		return foreign, nil
+	}
+
+	out, err := ApplyPipelineWithLookup(base, []bson.M{{
+		"$graphLookup": bson.M{
+			"from":                    "users",
+			"startWith":               "$manager_id",
+			"connectFromField":        "manager_id",
+			"connectToField":          "user_id",
+			"restrictSearchWithMatch": bson.M{"active": true},
+			"depthField":              "depth",
+			"maxDepth":                3,
+			"as":                      "hierarchy",
+		},
+	}}, resolver)
+	if err != nil {
+		t.Fatalf("ApplyPipelineWithLookup err: %v", err)
+	}
+	h, ok := out[0]["hierarchy"].([]bson.M)
+	if !ok || len(h) != 1 {
+		t.Fatalf("unexpected hierarchy: %#v", out[0]["hierarchy"])
+	}
+	if h[0]["user_id"] != 3 || h[0]["depth"] != int64(0) {
+		t.Fatalf("unexpected result: %#v", h[0])
+	}
+}
+
+// TestApplyPipeline_GraphLookup_MongoStyleManagementChain runs the corresponding test case.
+func TestApplyPipeline_GraphLookup_MongoStyleManagementChain(t *testing.T) {
+	base := []bson.M{
+		{"user_id": 3, "name": "Cara", "manager_id": 2},
+	}
+	foreign := []bson.M{
+		{"user_id": 1, "name": "Alice", "manager_id": nil, "active": true},
+		{"user_id": 2, "name": "Bob", "manager_id": 1, "active": true},
+		{"user_id": 3, "name": "Cara", "manager_id": 2, "active": true},
+		{"user_id": 4, "name": "Dan", "manager_id": 2, "active": false},
+	}
+	resolver := func(from string) ([]bson.M, error) {
+		return foreign, nil
+	}
+
+	out, err := ApplyPipelineWithLookup(base, []bson.M{{
+		"$graphLookup": bson.M{
+			"from":                    "users",
+			"startWith":               "$manager_id",
+			"connectFromField":        "manager_id",
+			"connectToField":          "user_id",
+			"restrictSearchWithMatch": bson.M{"active": true},
+			"depthField":              "depth",
+			"maxDepth":                3,
+			"as":                      "management_chain",
+		},
+	}}, resolver)
+	if err != nil {
+		t.Fatalf("ApplyPipelineWithLookup err: %v", err)
+	}
+	if out[0]["user_id"] != 3 || out[0]["name"] != "Cara" {
+		t.Fatalf("unexpected root doc: %#v", out[0])
+	}
+	chain, ok := out[0]["management_chain"].([]bson.M)
+	if !ok || len(chain) != 2 {
+		t.Fatalf("unexpected management_chain: %#v", out[0]["management_chain"])
+	}
+	if chain[0]["user_id"] != 2 || chain[0]["name"] != "Bob" || chain[0]["depth"] != int64(0) {
+		t.Fatalf("unexpected first chain hop: %#v", chain[0])
+	}
+	if chain[1]["user_id"] != 1 || chain[1]["name"] != "Alice" || chain[1]["depth"] != int64(1) {
+		t.Fatalf("unexpected second chain hop: %#v", chain[1])
+	}
+}
+
+// TestApplyPipeline_Project_DottedArrayFields runs the corresponding test case.
+func TestApplyPipeline_Project_DottedArrayFields(t *testing.T) {
+	docs := []bson.M{
+		{
+			"user_id": 3,
+			"name":    "Cara",
+			"management_chain": []bson.M{
+				{"user_id": 2, "name": "Bob", "depth": int64(0), "active": true},
+				{"user_id": 1, "name": "Alice", "depth": int64(1), "active": true},
+			},
+		},
+	}
+
+	out, err := ApplyPipeline(docs, []bson.M{{
+		"$project": bson.M{
+			"_id":                      0,
+			"user_id":                  1,
+			"name":                     1,
+			"management_chain.user_id": 1,
+			"management_chain.name":    1,
+			"management_chain.depth":   1,
+		},
+	}})
+	if err != nil {
+		t.Fatalf("ApplyPipeline err: %v", err)
+	}
+	if out[0]["user_id"] != 3 || out[0]["name"] != "Cara" {
+		t.Fatalf("unexpected root projection: %#v", out[0])
+	}
+	chain, ok := out[0]["management_chain"].([]interface{})
+	if !ok || len(chain) != 2 {
+		t.Fatalf("unexpected projected chain: %#v", out[0]["management_chain"])
+	}
+	first, _ := chain[0].(bson.M)
+	second, _ := chain[1].(bson.M)
+	if len(first) != 3 || first["user_id"] != 2 || first["name"] != "Bob" || first["depth"] != int64(0) {
+		t.Fatalf("unexpected first projected element: %#v", first)
+	}
+	if len(second) != 3 || second["user_id"] != 1 || second["name"] != "Alice" || second["depth"] != int64(1) {
+		t.Fatalf("unexpected second projected element: %#v", second)
+	}
+}
+
+// TestApplyPipeline_Project_ArithmeticStringBoolArrayDate runs the corresponding test case.
 func TestApplyPipeline_Project_ArithmeticStringBoolArrayDate(t *testing.T) {
 	docs := []bson.M{
 		{
@@ -962,6 +1219,7 @@ func TestApplyPipeline_Project_ArithmeticStringBoolArrayDate(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_Project_Phase2_MapFilterReduceSortZipRegexSubstrDate runs the corresponding test case.
 func TestApplyPipeline_Project_Phase2_MapFilterReduceSortZipRegexSubstrDate(t *testing.T) {
 	docs := []bson.M{
 		{
@@ -1046,6 +1304,7 @@ func TestApplyPipeline_Project_Phase2_MapFilterReduceSortZipRegexSubstrDate(t *t
 	}
 }
 
+// TestApplyPipeline_SetWindowFields_DenseRank_DocNum_Shift runs the corresponding test case.
 func TestApplyPipeline_SetWindowFields_DenseRank_DocNum_Shift(t *testing.T) {
 	docs := []bson.M{
 		{"_id": 1, "age": 30, "salary": 10.0},
@@ -1083,6 +1342,7 @@ func TestApplyPipeline_SetWindowFields_DenseRank_DocNum_Shift(t *testing.T) {
 	}
 }
 
+// TestApplyPipeline_Project_Phase3_ObjectConvertRegexFindDatePartsIsoIndexOfArray runs the corresponding test case.
 func TestApplyPipeline_Project_Phase3_ObjectConvertRegexFindDatePartsIsoIndexOfArray(t *testing.T) {
 	docs := []bson.M{
 		{

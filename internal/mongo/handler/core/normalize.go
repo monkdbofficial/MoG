@@ -39,6 +39,7 @@ const (
 	mogRawDataKey  = "__mog_raw_data__"
 )
 
+// normalizeRowValue is a helper used by the adapter.
 func normalizeRowValue(v interface{}) interface{} {
 	switch t := v.(type) {
 	case []byte:
@@ -77,6 +78,7 @@ func normalizeRowValue(v interface{}) interface{} {
 	}
 }
 
+// normalizeSQLArgs is a helper used by the adapter.
 func normalizeSQLArgs(args []interface{}) ([]interface{}, error) {
 	out := make([]interface{}, 0, len(args))
 	for _, a := range args {
@@ -96,6 +98,7 @@ func normalizeSQLArgs(args []interface{}) ([]interface{}, error) {
 	return out, nil
 }
 
+// normalizeDocForReply is a helper used by the adapter.
 func normalizeDocForReply(doc bson.M) {
 	if doc == nil {
 		return
@@ -123,6 +126,7 @@ func normalizeDocForReply(doc bson.M) {
 	}
 }
 
+// normalizeDocForStorage is a helper used by the adapter.
 func normalizeDocForStorage(doc bson.M) {
 	// Ensure _id exists and is stored as a stable string (hex) so the backend doesn't persist
 	// Extended JSON objects like {"$oid": "..."}.
@@ -161,6 +165,7 @@ func normalizeDocForStorage(doc bson.M) {
 	}
 }
 
+// normalizeValueForStorage is a helper used by the adapter.
 func normalizeValueForStorage(v interface{}) interface{} {
 	// Handle special sentinel values first (unexported types in bson).
 	if v == bson.MinKey {
@@ -271,6 +276,7 @@ func normalizeValueForStorage(v interface{}) interface{} {
 	}
 }
 
+// normalizeValueForReply is a helper used by the adapter.
 func normalizeValueForReply(key string, v interface{}) interface{} {
 	switch t := v.(type) {
 	case bson.M:
@@ -355,6 +361,7 @@ func normalizeValueForReply(key string, v interface{}) interface{} {
 	}
 }
 
+// coerceMogWrapperForReply is a helper used by the adapter.
 func coerceMogWrapperForReply(m bson.M) (interface{}, bool) {
 	// Only unwrap our own sentinel objects when they have an exact expected shape,
 	// to reduce the risk of clobbering user data.
@@ -428,6 +435,7 @@ func coerceMogWrapperForReply(m bson.M) (interface{}, bool) {
 	return nil, false
 }
 
+// unwrapMixedArray is a helper used by the adapter.
 func unwrapMixedArray(arr []interface{}) ([]interface{}, bool) {
 	if len(arr) == 0 {
 		return nil, false
@@ -450,6 +458,7 @@ func unwrapMixedArray(arr []interface{}) ([]interface{}, bool) {
 	return out, true
 }
 
+// isMixedMonkArray is a helper used by the adapter.
 func isMixedMonkArray(arr []interface{}) bool {
 	// MonkDB OBJECT lists require a homogeneous element type.
 	// Consider it "mixed" if we see multiple scalar kinds, nested arrays mixed with scalars,
@@ -642,6 +651,7 @@ func coerceExtendedJSONValue(m bson.M, forReply bool) (interface{}, bool) {
 	return nil, false
 }
 
+// encodeMongoKey is a helper used by the adapter.
 func encodeMongoKey(key string) string {
 	if key == "" || key == "_id" {
 		return key
@@ -654,6 +664,7 @@ func encodeMongoKey(key string) string {
 	return key
 }
 
+// decodeMongoKey is a helper used by the adapter.
 func decodeMongoKey(key string) string {
 	if key == "" || key == "_id" {
 		return key
@@ -663,6 +674,7 @@ func decodeMongoKey(key string) string {
 	return key
 }
 
+// looksLikeObjectIDKey is a helper used by the adapter.
 func looksLikeObjectIDKey(key string) bool {
 	if key == "" {
 		return false
@@ -676,6 +688,7 @@ func looksLikeObjectIDKey(key string) bool {
 	return false
 }
 
+// looksLikeTimeKey is a helper used by the adapter.
 func looksLikeTimeKey(key string) bool {
 	if key == "" {
 		return false
@@ -690,6 +703,7 @@ func looksLikeTimeKey(key string) bool {
 	return false
 }
 
+// parseRFC3339Time is a helper used by the adapter.
 func parseRFC3339Time(s string) (time.Time, bool) {
 	// Support the most common encodings produced by JSON marshallers and drivers.
 	if ts, err := time.Parse(time.RFC3339Nano, s); err == nil {
@@ -701,6 +715,7 @@ func parseRFC3339Time(s string) (time.Time, bool) {
 	return time.Time{}, false
 }
 
+// isIntegralFloat is a helper used by the adapter.
 func isIntegralFloat(f float64) bool {
 	if math.IsNaN(f) || math.IsInf(f, 0) {
 		return false
@@ -708,11 +723,13 @@ func isIntegralFloat(f float64) bool {
 	return math.Trunc(f) == f
 }
 
+// parseInt64 is a helper used by the adapter.
 func parseInt64(s string) (int64, error) {
 	// strconv.ParseInt doesn't accept leading '+' for some cases in extjson, but it's fine.
 	return strconv.ParseInt(s, 10, 64)
 }
 
+// parseFloat64 is a helper used by the adapter.
 func parseFloat64(s string) (float64, error) {
 	return strconv.ParseFloat(s, 64)
 }

@@ -22,6 +22,7 @@ type cachedTableSchema struct {
 var globalSchemaCache = &tableSchemaCache{tables: map[string]*cachedTableSchema{}}
 var globalDDLLocks sync.Map // physical -> *sync.Mutex
 
+// ddlLockForTable is a helper used by the adapter.
 func ddlLockForTable(physical string) *sync.Mutex {
 	if physical == "" {
 		return &sync.Mutex{}
@@ -39,6 +40,7 @@ func ddlLockForTable(physical string) *sync.Mutex {
 	return m
 }
 
+// get is a helper used by the adapter.
 func (c *tableSchemaCache) get(physical string) *cachedTableSchema {
 	if c == nil || physical == "" {
 		return nil
@@ -49,6 +51,7 @@ func (c *tableSchemaCache) get(physical string) *cachedTableSchema {
 	return t
 }
 
+// ensure is a helper used by the adapter.
 func (c *tableSchemaCache) ensure(physical string) *cachedTableSchema {
 	if c == nil || physical == "" {
 		return nil
@@ -63,6 +66,7 @@ func (c *tableSchemaCache) ensure(physical string) *cachedTableSchema {
 	return t
 }
 
+// markInitialized is a helper used by the adapter.
 func (c *tableSchemaCache) markInitialized(physical string) {
 	if c == nil || physical == "" {
 		return
@@ -73,6 +77,7 @@ func (c *tableSchemaCache) markInitialized(physical string) {
 	c.mu.Unlock()
 }
 
+// isInitialized is a helper used by the adapter.
 func (c *tableSchemaCache) isInitialized(physical string) bool {
 	if c == nil || physical == "" {
 		return false
@@ -84,6 +89,7 @@ func (c *tableSchemaCache) isInitialized(physical string) bool {
 	return ok
 }
 
+// hasColumn is a helper used by the adapter.
 func (c *tableSchemaCache) hasColumn(physical, col string) bool {
 	if c == nil || physical == "" || col == "" {
 		return false
@@ -99,6 +105,7 @@ func (c *tableSchemaCache) hasColumn(physical, col string) bool {
 	return ok
 }
 
+// setColumn is a helper used by the adapter.
 func (c *tableSchemaCache) setColumn(physical, col, sqlType string) {
 	if c == nil || physical == "" || col == "" {
 		return
@@ -115,6 +122,7 @@ func (c *tableSchemaCache) setColumn(physical, col, sqlType string) {
 	c.mu.Unlock()
 }
 
+// clear is a helper used by the adapter.
 func (c *tableSchemaCache) clear(physical string) {
 	if c == nil || physical == "" {
 		return
@@ -124,6 +132,7 @@ func (c *tableSchemaCache) clear(physical string) {
 	c.mu.Unlock()
 }
 
+// clearDB is a helper used by the adapter.
 func (c *tableSchemaCache) clearDB(dbName string) {
 	if c == nil || dbName == "" {
 		return
@@ -138,10 +147,12 @@ func (c *tableSchemaCache) clearDB(dbName string) {
 	c.mu.Unlock()
 }
 
+// schemaCache is a helper used by the adapter.
 func (h *Handler) schemaCache() *tableSchemaCache {
 	return globalSchemaCache
 }
 
+// listColumnsExec is a helper used by the adapter.
 func (h *Handler) listColumnsExec(ctx context.Context, exec DBExecutor, physical string) ([]string, error) {
 	if exec == nil || physical == "" {
 		return nil, nil
@@ -154,6 +165,11 @@ func (h *Handler) listColumnsExec(ctx context.Context, exec DBExecutor, physical
 			c.mu.RLock()
 			for col := range t.columns {
 				if col == "" {
+					continue
+				}
+				// Skip backend-exposed "object sub-columns" like `meta['path']`.
+				// We only want top-level physical columns here.
+				if strings.Contains(col, "['") {
 					continue
 				}
 				cols = append(cols, strings.ToLower(col))
@@ -186,6 +202,11 @@ func (h *Handler) listColumnsExec(ctx context.Context, exec DBExecutor, physical
 	for rows.Next() {
 		var c string
 		if err := rows.Scan(&c); err == nil && c != "" {
+			// CrateDB exposes object sub-columns in information_schema with names like
+			// `meta['path']` or `data['user_id']`. These are not physical columns.
+			if strings.Contains(c, "['") {
+				continue
+			}
 			cols = append(cols, strings.ToLower(c))
 		}
 	}

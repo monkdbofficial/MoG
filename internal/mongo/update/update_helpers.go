@@ -5,6 +5,7 @@ import (
 	"reflect"
 )
 
+// isSliceLike is a helper used by the adapter.
 func isSliceLike(v interface{}) bool {
 	if v == nil {
 		return false
@@ -23,6 +24,7 @@ func isSliceLike(v interface{}) bool {
 	return true
 }
 
+// arrayContains is a helper used by the adapter.
 func arrayContains(arr []interface{}, v interface{}) bool {
 	for _, el := range arr {
 		if reflect.DeepEqual(el, v) || fmt.Sprint(el) == fmt.Sprint(v) {

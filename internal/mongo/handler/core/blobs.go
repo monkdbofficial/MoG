@@ -24,6 +24,7 @@ import (
 // the full value as a single term, tripping the limit.
 const luceneMaxTermBytes = 32766
 
+// blobHTTPClient is a helper used by the adapter.
 func (h *Handler) blobHTTPClient() *http.Client {
 	if h != nil && h.blobHTTPTransport != nil {
 		return &http.Client{Timeout: h.httpTimeout(), Transport: h.blobHTTPTransport}
@@ -31,6 +32,7 @@ func (h *Handler) blobHTTPClient() *http.Client {
 	return &http.Client{Timeout: h.httpTimeout()}
 }
 
+// validateNoOversizeInlineBinary is a helper used by the adapter.
 func validateNoOversizeInlineBinary(v interface{}) error {
 	var walk func(v interface{}) error
 	walk = func(v interface{}) error {
@@ -65,6 +67,7 @@ func validateNoOversizeInlineBinary(v interface{}) error {
 	return walk(v)
 }
 
+// ensureBlobInfra is a helper used by the adapter.
 func (h *Handler) ensureBlobInfra(ctx context.Context) error {
 	if !h.blobEnabled() {
 		return nil
@@ -114,6 +117,7 @@ CREATE TABLE IF NOT EXISTS %s (
 	return h.blobInitErr
 }
 
+// offloadBlobsInDoc is a helper used by the adapter.
 func (h *Handler) offloadBlobsInDoc(ctx context.Context, exec DBExecutor, physical string, docID string, doc bson.M) error {
 	if doc == nil {
 		return nil
@@ -223,6 +227,7 @@ func (h *Handler) offloadBlobsInDoc(ctx context.Context, exec DBExecutor, physic
 	return nil
 }
 
+// putBlob is a helper used by the adapter.
 func (h *Handler) putBlob(ctx context.Context, table string, sha1hex string, data []byte) error {
 	if strings.TrimSpace(table) == "" || sha1hex == "" {
 		return fmt.Errorf("invalid blob target")
@@ -254,6 +259,7 @@ func (h *Handler) putBlob(ctx context.Context, table string, sha1hex string, dat
 	return fmt.Errorf("blob upload failed: %s", resp.Status)
 }
 
+// getBlob is a helper used by the adapter.
 func (h *Handler) getBlob(ctx context.Context, table string, sha1hex string, maxBytes int) ([]byte, error) {
 	if strings.TrimSpace(table) == "" || sha1hex == "" {
 		return nil, fmt.Errorf("invalid blob source")
@@ -295,6 +301,7 @@ func (h *Handler) getBlob(ctx context.Context, table string, sha1hex string, max
 	return data, nil
 }
 
+// insertBlobMetadataBestEffort is a helper used by the adapter.
 func (h *Handler) insertBlobMetadataBestEffort(ctx context.Context, exec DBExecutor, sha1hex string, logicalPath string, contentType string, physical string, docID string) error {
 	if exec == nil {
 		return nil
@@ -329,6 +336,7 @@ func (h *Handler) insertBlobMetadataBestEffort(ctx context.Context, exec DBExecu
 	return nil
 }
 
+// joinPath is a helper used by the adapter.
 func joinPath(prefix, key string) string {
 	if prefix == "" {
 		return key
@@ -339,11 +347,13 @@ func joinPath(prefix, key string) string {
 	return prefix + "." + key
 }
 
+// normalizeDocForReplyWithBlobs is a helper used by the adapter.
 func (h *Handler) normalizeDocForReplyWithBlobs(ctx context.Context, doc bson.M) error {
 	normalizeDocForReply(doc)
 	return h.inlineBlobsForReply(ctx, doc)
 }
 
+// inlineBlobsForReply is a helper used by the adapter.
 func (h *Handler) inlineBlobsForReply(ctx context.Context, doc bson.M) error {
 	if !h.blobInlineReads || doc == nil {
 		return nil

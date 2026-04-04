@@ -7,6 +7,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// TestTranslateUpdate_Inc runs the corresponding test case.
 func TestTranslateUpdate_Inc(t *testing.T) {
 	tr := New()
 	sql, args, err := tr.TranslateUpdate("db__col", bson.M{"age": bson.M{"$lt": 30}}, bson.M{"$inc": bson.M{"score": 5}})
@@ -24,6 +25,7 @@ func TestTranslateUpdate_Inc(t *testing.T) {
 	}
 }
 
+// TestTranslateUpdate_Set_BsonD runs the corresponding test case.
 func TestTranslateUpdate_Set_BsonD(t *testing.T) {
 	tr := New()
 	sql, args, err := tr.TranslateUpdate(
@@ -42,6 +44,7 @@ func TestTranslateUpdate_Set_BsonD(t *testing.T) {
 	}
 }
 
+// TestTranslateFind_NestedField runs the corresponding test case.
 func TestTranslateFind_NestedField(t *testing.T) {
 	tr := New()
 	sql, _, err := tr.TranslateFind("db__col", bson.M{"orders.amount": bson.M{"$gte": 200}})
@@ -53,6 +56,7 @@ func TestTranslateFind_NestedField(t *testing.T) {
 	}
 }
 
+// TestTranslateFindWithOptions_SortLimitSkip_In runs the corresponding test case.
 func TestTranslateFindWithOptions_SortLimitSkip_In(t *testing.T) {
 	tr := New()
 	sql, args, err := tr.TranslateFindWithOptions(
@@ -82,6 +86,7 @@ func TestTranslateFindWithOptions_SortLimitSkip_In(t *testing.T) {
 	}
 }
 
+// TestTranslateCount_NoFilter runs the corresponding test case.
 func TestTranslateCount_NoFilter(t *testing.T) {
 	tr := New()
 	sql, args, err := tr.TranslateCount("db__col", bson.M{})
@@ -96,6 +101,7 @@ func TestTranslateCount_NoFilter(t *testing.T) {
 	}
 }
 
+// TestTranslateDelete_NoFilter runs the corresponding test case.
 func TestTranslateDelete_NoFilter(t *testing.T) {
 	tr := New()
 	sql, args, err := tr.TranslateDelete("db__col", bson.M{})
@@ -110,6 +116,7 @@ func TestTranslateDelete_NoFilter(t *testing.T) {
 	}
 }
 
+// TestTranslateAggregatePlan_GroupSortLimit runs the corresponding test case.
 func TestTranslateAggregatePlan_GroupSortLimit(t *testing.T) {
 	tr := New()
 	plan, err := tr.TranslateAggregatePlan("db__col", []bson.M{
@@ -148,6 +155,7 @@ func TestTranslateAggregatePlan_GroupSortLimit(t *testing.T) {
 	}
 }
 
+// TestTranslateAggregatePlan_NoGroup_SortLimit runs the corresponding test case.
 func TestTranslateAggregatePlan_NoGroup_SortLimit(t *testing.T) {
 	tr := New()
 	plan, err := tr.TranslateAggregatePlan("db__col", []bson.M{
@@ -175,6 +183,7 @@ func TestTranslateAggregatePlan_NoGroup_SortLimit(t *testing.T) {
 	}
 }
 
+// TestTranslateAggregatePrefixPlan_PushdownThenStop runs the corresponding test case.
 func TestTranslateAggregatePrefixPlan_PushdownThenStop(t *testing.T) {
 	tr := New()
 	p, err := tr.TranslateAggregatePrefixPlan("db__col", []bson.M{
@@ -204,6 +213,7 @@ func TestTranslateAggregatePrefixPlan_PushdownThenStop(t *testing.T) {
 	}
 }
 
+// TestTranslateAggregatePrefixPlan_Count runs the corresponding test case.
 func TestTranslateAggregatePrefixPlan_Count(t *testing.T) {
 	tr := New()
 	p, err := tr.TranslateAggregatePrefixPlan("db__col", []bson.M{
@@ -225,6 +235,7 @@ func TestTranslateAggregatePrefixPlan_Count(t *testing.T) {
 	}
 }
 
+// TestTranslateAggregatePlan_GroupNullID_NoGroupBy runs the corresponding test case.
 func TestTranslateAggregatePlan_GroupNullID_NoGroupBy(t *testing.T) {
 	tr := New()
 	plan, err := tr.TranslateAggregatePlan("db__col", []bson.M{
@@ -242,6 +253,7 @@ func TestTranslateAggregatePlan_GroupNullID_NoGroupBy(t *testing.T) {
 	}
 }
 
+// TestTranslateAggregatePrefixPlan_GroupNullID_NoGroupBy runs the corresponding test case.
 func TestTranslateAggregatePrefixPlan_GroupNullID_NoGroupBy(t *testing.T) {
 	tr := New()
 	p, err := tr.TranslateAggregatePrefixPlan("db__col", []bson.M{

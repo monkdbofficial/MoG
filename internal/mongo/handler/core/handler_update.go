@@ -4,16 +4,19 @@ import (
 	"context"
 	"fmt"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/mgo.v2/bson"
 
+	"mog/internal/mongo/handler/relational"
 	"mog/internal/mongo/handler/shared"
 	mpipeline "mog/internal/mongo/pipeline"
 	mupdate "mog/internal/mongo/update"
 )
 
+// applyDynamicUpdate is a helper used by the adapter.
 func (h *Handler) applyDynamicUpdate(ctx context.Context, tx pgx.Tx, physical string, filter bson.M, update bson.M, multi bool) (matched int, modified int, err error) {
 	if h.pool == nil {
 		return 0, 0, fmt.Errorf("database pool is not configured")
@@ -92,6 +95,7 @@ func (h *Handler) applyDynamicUpdate(ctx context.Context, tx pgx.Tx, physical st
 	return matched, modified, nil
 }
 
+// stringifyID is a helper used by the adapter.
 func stringifyID(v interface{}) string {
 	switch t := v.(type) {
 	case string:
@@ -103,6 +107,7 @@ func stringifyID(v interface{}) string {
 	}
 }
 
+// applyPureSQLUpdate is a helper used by the adapter.
 func (h *Handler) applyPureSQLUpdate(ctx context.Context, exec DBExecutor, physical string, filter bson.M, update bson.M, multi bool, upsert bool) (matched int, modified int, upsertedID interface{}, err error) {
 	if h.pool == nil {
 		return 0, 0, nil, fmt.Errorf("database pool is not configured")
@@ -229,15 +234,15 @@ func (h *Handler) applyPureSQLUpdate(ctx context.Context, exec DBExecutor, physi
 		}
 	}
 
-	// Load all docs and apply the match/update in-memory for maximum Mongo compatibility.
-	pdocs, err := h.loadSQLDocsWithIDs(ctx, exec, physical)
+	// Use SQL as a coarse pre-filter when we can, then preserve Mongo semantics in-memory.
+	pdocs, residualFilter, err := h.loadCandidateSQLDocsWithIDs(ctx, exec, physical, filter, !multi)
 	if err != nil {
 		return 0, 0, nil, err
 	}
 
 	var targets []pureSQLDoc
 	for _, pd := range pdocs {
-		if mpipeline.MatchDoc(pd.doc, filter) {
+		if len(residualFilter) == 0 || mpipeline.MatchDoc(pd.doc, residualFilter) {
 			targets = append(targets, pd)
 			if !multi {
 				break
@@ -272,14 +277,22 @@ func (h *Handler) applyPureSQLUpdate(ctx context.Context, exec DBExecutor, physi
 	}
 
 	for _, t := range targets {
-		newDoc, _ := mupdate.ApplyUpdate(t.doc, update)
+		fullDocs, err := h.loadSQLDocsWithIDsQuery(ctx, exec, "SELECT "+strings.Join(orderSelectColumns(mustListColumnsExec(ctx, h, exec, physical)), ", ")+" FROM doc."+physical+" WHERE id = $1", t.docID)
+		if err != nil {
+			return matched, modified, nil, err
+		}
+		if len(fullDocs) == 0 {
+			continue
+		}
+		oldDoc := fullDocs[0].doc
+		newDoc, _ := mupdate.ApplyUpdate(oldDoc, update)
 		normalizeDocForStorage(newDoc)
 		// Ensure _id remains stable even if an update tries to change it.
-		if oldID, ok := t.doc["_id"]; ok {
+		if oldID, ok := oldDoc["_id"]; ok {
 			newDoc["_id"] = oldID
 		}
 
-		if !reflect.DeepEqual(t.doc, newDoc) {
+		if !reflect.DeepEqual(oldDoc, newDoc) {
 			modified++
 		}
 
@@ -294,6 +307,141 @@ func (h *Handler) applyPureSQLUpdate(ctx context.Context, exec DBExecutor, physi
 	return matched, modified, nil, nil
 }
 
+// loadCandidateSQLDocsWithIDs is a helper used by the adapter.
+func (h *Handler) loadCandidateSQLDocsWithIDs(ctx context.Context, exec DBExecutor, physical string, filter bson.M, single bool) ([]pureSQLDoc, bson.M, error) {
+	pushdown, err := relational.BuildFilterPushdown(filter)
+	if err != nil {
+		return nil, nil, err
+	}
+	if len(pushdown.PushedFilter) == 0 || pushdown.Where == nil || strings.TrimSpace(pushdown.Where.SQL) == "" {
+		pdocs, err := h.loadSQLDocsWithIDs(ctx, exec, physical)
+		return pdocs, filter, err
+	}
+
+	selectList, err := h.candidateSelectList(ctx, exec, physical, pushdown.ResidualFilter)
+	if err != nil {
+		return nil, nil, err
+	}
+	query := "SELECT " + selectList + " FROM doc." + physical + " WHERE " + pushdown.Where.SQL
+	if single && len(pushdown.ResidualFilter) == 0 {
+		query += " LIMIT 1"
+	}
+
+	pdocs, err := h.loadSQLDocsWithIDsQuery(ctx, exec, query, pushdown.Where.Args...)
+	if err == nil {
+		return pdocs, pushdown.ResidualFilter, nil
+	}
+	pdocs, err = h.loadSQLDocsWithIDs(ctx, exec, physical)
+	return pdocs, filter, err
+}
+
+// candidateSelectList is a helper used by the adapter.
+func (h *Handler) candidateSelectList(ctx context.Context, exec DBExecutor, physical string, filter bson.M) (string, error) {
+	_ = ctx
+	_ = exec
+	_ = physical
+	needed := map[string]struct{}{"id": {}}
+	if h.storeRawMongoJSON {
+		needed["data"] = struct{}{}
+	}
+	for _, field := range filterFieldRoots(filter) {
+		col := shared.SQLColumnNameForField(field)
+		if col != "" {
+			needed[col] = struct{}{}
+		}
+	}
+	out := make([]string, 0, len(needed))
+	for _, col := range orderNeededColumns(sortedNeededColumns(needed)) {
+		out = append(out, col)
+	}
+	if len(out) == 0 {
+		out = append(out, "id")
+	}
+	return strings.Join(out, ", "), nil
+}
+
+// filterFieldRoots is a helper used by the adapter.
+func filterFieldRoots(filter bson.M) []string {
+	roots := map[string]struct{}{}
+	var walk func(bson.M)
+	walk = func(m bson.M) {
+		for k, v := range m {
+			if strings.HasPrefix(k, "$") {
+				if sub, ok := shared.CoerceBsonM(v); ok {
+					walk(sub)
+				}
+				continue
+			}
+			root := strings.Split(k, ".")[0]
+			if root != "" && root != "_id" {
+				roots[root] = struct{}{}
+			}
+			if cond, ok := shared.CoerceBsonM(v); ok && mpipeline.DocHasOperatorKeys(cond) {
+				walk(cond)
+			}
+		}
+	}
+	walk(filter)
+	out := make([]string, 0, len(roots))
+	for root := range roots {
+		out = append(out, root)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// mustListColumnsExec is a helper used by the adapter.
+func mustListColumnsExec(ctx context.Context, h *Handler, exec DBExecutor, physical string) []string {
+	cols, err := h.listColumnsExec(ctx, exec, physical)
+	if err != nil || len(cols) == 0 {
+		return []string{"id"}
+	}
+	return cols
+}
+
+// sortedNeededColumns is a helper used by the adapter.
+func sortedNeededColumns(cols map[string]struct{}) []string {
+	out := make([]string, 0, len(cols))
+	for col := range cols {
+		out = append(out, col)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// orderNeededColumns is a helper used by the adapter.
+func orderNeededColumns(cols []string) []string {
+	available := map[string]struct{}{}
+	for _, col := range cols {
+		available[col] = struct{}{}
+	}
+	seen := map[string]struct{}{}
+	out := make([]string, 0, len(cols))
+	appendCol := func(col string) {
+		if col == "" {
+			return
+		}
+		if _, ok := available[col]; !ok {
+			return
+		}
+		if _, ok := seen[col]; ok {
+			return
+		}
+		seen[col] = struct{}{}
+		out = append(out, col)
+	}
+	appendCol("id")
+	appendCol("data")
+	for _, col := range cols {
+		if col == "id" || col == "data" {
+			continue
+		}
+		appendCol(col)
+	}
+	return out
+}
+
+// isReplacementUpdateDoc is a helper used by the adapter.
 func isReplacementUpdateDoc(update bson.M) bool {
 	for k := range update {
 		if strings.HasPrefix(k, "$") {
@@ -303,6 +451,7 @@ func isReplacementUpdateDoc(update bson.M) bool {
 	return true
 }
 
+// cloneBsonM is a helper used by the adapter.
 func cloneBsonM(in bson.M) bson.M {
 	if in == nil {
 		return bson.M{}
@@ -314,6 +463,7 @@ func cloneBsonM(in bson.M) bson.M {
 	return out
 }
 
+// canonicalStorageIDAndDocID is a helper used by the adapter.
 func canonicalStorageIDAndDocID(rawID interface{}) (storageID interface{}, docID string, ok bool, err error) {
 	if rawID == nil {
 		return nil, "", false, nil

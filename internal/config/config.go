@@ -29,6 +29,7 @@ type Config struct {
 	MetricsPort   int      `mapstructure:"MOG_METRICS_PORT"`
 }
 
+// loadDotEnv is a helper used by the adapter.
 func loadDotEnv() {
 	// Minimal .env loader (no extra dependencies). It only sets keys that are not already set
 	// in the environment, so real env vars always win.
@@ -70,6 +71,7 @@ func loadDotEnv() {
 	}
 }
 
+// loadDotEnvFile is a helper used by the adapter.
 func loadDotEnvFile(p string) {
 	if p == "" {
 		return

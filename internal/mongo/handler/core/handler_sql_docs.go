@@ -5,15 +5,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"sort"
 	"strings"
+	"time"
+
+	mongopath "mog/internal/mongo"
+	"mog/internal/mongo/handler/shared"
 
 	"github.com/jackc/pgx/v5"
 	"gopkg.in/mgo.v2/bson"
-
-	"mog/internal/mongo/handler/shared"
 )
 
 // SQL schema and document loading helpers.
+
+// ensureDocSchema is a helper used by the adapter.
 func (h *Handler) ensureDocSchema(ctx context.Context) error {
 	if h.pool == nil {
 		return nil
@@ -22,6 +27,7 @@ func (h *Handler) ensureDocSchema(ctx context.Context) error {
 	return err
 }
 
+// ensureDocSchemaExec is a helper used by the adapter.
 func (h *Handler) ensureDocSchemaExec(ctx context.Context, exec DBExecutor) error {
 	if exec == nil {
 		return nil
@@ -31,10 +37,12 @@ func (h *Handler) ensureDocSchemaExec(ctx context.Context, exec DBExecutor) erro
 }
 
 type pureSQLDoc struct {
-	docID string
-	doc   bson.M
+	docID      string
+	doc        bson.M
+	fieldOrder []string
 }
 
+// decodeDocID is a helper used by the adapter.
 func decodeDocID(docID string) interface{} {
 	if docID == "" {
 		return nil
@@ -47,6 +55,7 @@ func decodeDocID(docID string) interface{} {
 	return docID
 }
 
+// encodeDocID is a helper used by the adapter.
 func encodeDocID(v interface{}) (string, error) {
 	if v == nil {
 		return "", fmt.Errorf("_id is nil")
@@ -58,6 +67,7 @@ func encodeDocID(v interface{}) (string, error) {
 	return string(b), nil
 }
 
+// loadSQLDocsWithIDs is a helper used by the adapter.
 func (h *Handler) loadSQLDocsWithIDs(ctx context.Context, exec DBExecutor, physical string) ([]pureSQLDoc, error) {
 	if exec == nil {
 		return nil, fmt.Errorf("db executor is nil")
@@ -65,9 +75,14 @@ func (h *Handler) loadSQLDocsWithIDs(ctx context.Context, exec DBExecutor, physi
 	if physical == "" {
 		return []pureSQLDoc{}, nil
 	}
-	return h.loadSQLDocsWithIDsQuery(ctx, exec, "SELECT * FROM doc."+physical)
+	selectList, err := h.selectColumnList(ctx, exec, physical)
+	if err != nil {
+		return nil, err
+	}
+	return h.loadSQLDocsWithIDsQuery(ctx, exec, "SELECT "+selectList+" FROM doc."+physical)
 }
 
+// docExistsByID is a helper used by the adapter.
 func (h *Handler) docExistsByID(ctx context.Context, exec DBExecutor, physical string, docID string) (bool, error) {
 	if exec == nil {
 		return false, fmt.Errorf("db executor is nil")
@@ -89,6 +104,7 @@ func (h *Handler) docExistsByID(ctx context.Context, exec DBExecutor, physical s
 	return false, err
 }
 
+// loadSQLDocsWithIDsQuery is a helper used by the adapter.
 func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, query string, args ...interface{}) ([]pureSQLDoc, error) {
 	if exec == nil {
 		return nil, fmt.Errorf("db executor is nil")
@@ -97,8 +113,23 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 		return []pureSQLDoc{}, nil
 	}
 
+	start := time.Now()
+	dbStart := time.Now()
 	rows, err := exec.Query(ctx, query, args...)
+	dbDuration := time.Since(dbStart)
 	if err != nil {
+		mongopath.LogQuery(mongopath.QueryLogOptions{
+			Stage:         "db.query",
+			Operation:     "load_sql_docs",
+			Table:         queryTableFromQuery(query),
+			QueryName:     "load_sql_docs",
+			QueryTemplate: query,
+			ArgsCount:     len(args),
+			StartedAt:     start,
+			DBDuration:    dbDuration,
+			TotalDuration: dbDuration,
+			Error:         err,
+		})
 		if isUndefinedRelation(err) || isUndefinedSchema(err) {
 			return []pureSQLDoc{}, nil
 		}
@@ -108,7 +139,24 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 
 	fields := rows.FieldDescriptions()
 	numFields := len(fields)
+	fieldOrder := make([]string, 0, numFields)
+	for _, fd := range fields {
+		col := string(fd.Name)
+		if col == "" || col == "data" {
+			continue
+		}
+		if col == "id" {
+			fieldOrder = append(fieldOrder, "_id")
+			continue
+		}
+		field := shared.MongoFieldNameForColumn(col)
+		if field == "" {
+			continue
+		}
+		fieldOrder = append(fieldOrder, field)
+	}
 	out := make([]pureSQLDoc, 0, 16) // Pre-allocate small capacity
+	scanStart := time.Now()
 	for rows.Next() {
 		vals, err := rows.Values()
 		if err != nil {
@@ -199,15 +247,36 @@ func (h *Handler) loadSQLDocsWithIDsQuery(ctx context.Context, exec DBExecutor, 
 		// Normalize so any backend-emitted Extended JSON wrappers (e.g. $numberLong)
 		// are rehydrated before we do in-memory match/update logic.
 		normalizeDocForReply(doc)
-		out = append(out, pureSQLDoc{docID: docID, doc: doc})
+		out = append(out, pureSQLDoc{docID: docID, doc: doc, fieldOrder: append([]string(nil), fieldOrder...)})
 	}
+	scanDuration := time.Since(scanStart)
+	totalDuration := time.Since(start)
+	mongopath.LogQuery(mongopath.QueryLogOptions{
+		Stage:         "db.query",
+		Operation:     "load_sql_docs",
+		Table:         queryTableFromQuery(query),
+		QueryName:     "load_sql_docs",
+		QueryTemplate: query,
+		ArgsCount:     len(args),
+		StartedAt:     start,
+		DBDuration:    dbDuration,
+		ScanDuration:  scanDuration,
+		TotalDuration: totalDuration,
+		Rows:          len(out),
+		TxUsage:       "pool",
+	})
 	return out, nil
 }
 
+// loadSQLDocs is a helper used by the adapter.
 func (h *Handler) loadSQLDocs(ctx context.Context, physical string) ([]bson.M, error) {
 	// For performance and safety under high throughput, never load more than 1000 docs
 	// if pushdown failed. In-memory filtering/sorting is extremely slow.
-	pdocs, err := h.loadSQLDocsWithIDsQuery(ctx, h.db(), "SELECT * FROM doc."+physical+" LIMIT 1000")
+	selectList, err := h.selectColumnList(ctx, h.db(), physical)
+	if err != nil {
+		return nil, err
+	}
+	pdocs, err := h.loadSQLDocsWithIDsQuery(ctx, h.db(), "SELECT "+selectList+" FROM doc."+physical+" LIMIT 1000")
 	if err != nil {
 		return nil, err
 	}
@@ -218,6 +287,58 @@ func (h *Handler) loadSQLDocs(ctx context.Context, physical string) ([]bson.M, e
 	return out, nil
 }
 
+// selectColumnList is a helper used by the adapter.
+func (h *Handler) selectColumnList(ctx context.Context, exec DBExecutor, physical string) (string, error) {
+	cols, err := h.listColumnsExec(ctx, exec, physical)
+	if err != nil {
+		return "", err
+	}
+	if len(cols) == 0 {
+		return "id", nil
+	}
+	return strings.Join(orderSelectColumns(cols), ", "), nil
+}
+
+// orderSelectColumns is a helper used by the adapter.
+func orderSelectColumns(cols []string) []string {
+	out := make([]string, 0, len(cols))
+	seen := map[string]struct{}{}
+	appendCol := func(col string) {
+		col = strings.TrimSpace(strings.ToLower(col))
+		if col == "" {
+			return
+		}
+		if _, ok := seen[col]; ok {
+			return
+		}
+		seen[col] = struct{}{}
+		out = append(out, col)
+	}
+	appendCol("id")
+	appendCol("data")
+	for _, col := range cols {
+		if col == "id" || col == "data" {
+			continue
+		}
+		appendCol(col)
+	}
+	return out
+}
+
+// queryTableFromQuery is a helper used by the adapter.
+func queryTableFromQuery(query string) string {
+	lower := strings.ToLower(query)
+	if idx := strings.Index(lower, "from "); idx >= 0 {
+		rest := strings.TrimSpace(query[idx+5:])
+		if idx := strings.IndexAny(rest, " \t;"); idx >= 0 {
+			rest = rest[:idx]
+		}
+		return strings.Trim(rest, "\"")
+	}
+	return ""
+}
+
+// ensureCollectionTable is a helper used by the adapter.
 func (h *Handler) ensureCollectionTable(ctx context.Context, collection string) error {
 	if h.pool == nil {
 		return fmt.Errorf("database pool is not configured")
@@ -225,6 +346,49 @@ func (h *Handler) ensureCollectionTable(ctx context.Context, collection string) 
 	return h.ensureCollectionTableExec(ctx, h.pool, collection)
 }
 
+// ensureCollectionTableWithColumnsExec is a helper used by the adapter.
+func (h *Handler) ensureCollectionTableWithColumnsExec(ctx context.Context, exec DBExecutor, collection string, colTypes map[string]string) error {
+	if exec == nil {
+		return fmt.Errorf("db executor is nil")
+	}
+	if collection == "" {
+		return fmt.Errorf("empty collection")
+	}
+	if h.schemaCache().isInitialized(collection) {
+		return h.ensureCollectionTableExec(ctx, exec, collection)
+	}
+	if !shared.IsSafeIdentifier(collection) {
+		return fmt.Errorf("invalid collection name: %s", collection)
+	}
+	_ = h.ensureDocSchemaExec(ctx, exec)
+
+	defs := []string{"id TEXT PRIMARY KEY"}
+	if h.storeRawMongoJSON {
+		defs = append(defs, "data OBJECT(DYNAMIC)")
+	}
+	cols := make([]string, 0, len(colTypes))
+	for col := range colTypes {
+		if col == "" || col == "id" || col == "data" {
+			continue
+		}
+		cols = append(cols, col)
+	}
+	sort.Strings(cols)
+	for _, col := range cols {
+		sqlType := strings.TrimSpace(colTypes[col])
+		if sqlType == "" {
+			continue
+		}
+		defs = append(defs, fmt.Sprintf("%s %s", col, sqlType))
+	}
+
+	if _, err := exec.Exec(ctx, "CREATE TABLE IF NOT EXISTS doc."+collection+" ("+strings.Join(defs, ", ")+")"); err != nil {
+		return err
+	}
+	return h.ensureCollectionTableExec(ctx, exec, collection)
+}
+
+// ensureCollectionTableExec is a helper used by the adapter.
 func (h *Handler) ensureCollectionTableExec(ctx context.Context, exec DBExecutor, collection string) error {
 	if exec == nil {
 		return fmt.Errorf("db executor is nil")
@@ -298,6 +462,7 @@ func (h *Handler) ensureCollectionTableExec(ctx context.Context, exec DBExecutor
 	return nil
 }
 
+// ensureColumn is a helper used by the adapter.
 func (h *Handler) ensureColumn(ctx context.Context, physical string, col string, sqlType string) error {
 	if h.pool == nil {
 		return fmt.Errorf("database pool is not configured")
@@ -305,6 +470,7 @@ func (h *Handler) ensureColumn(ctx context.Context, physical string, col string,
 	return h.ensureColumnExec(ctx, h.pool, physical, col, sqlType)
 }
 
+// ensureColumnExec is a helper used by the adapter.
 func (h *Handler) ensureColumnExec(ctx context.Context, exec DBExecutor, physical string, col string, sqlType string) error {
 	if exec == nil {
 		return fmt.Errorf("db executor is nil")
@@ -329,6 +495,7 @@ func (h *Handler) ensureColumnExec(ctx context.Context, exec DBExecutor, physica
 	return nil
 }
 
+// listColumns is a helper used by the adapter.
 func (h *Handler) listColumns(ctx context.Context, physical string) ([]string, error) {
 	if h.pool == nil || physical == "" {
 		return nil, nil

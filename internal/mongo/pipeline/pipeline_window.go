@@ -8,7 +8,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
-// $setWindowFields stage implementation.
+// applySetWindowFields evaluates a $setWindowFields stage (subset).
 func applySetWindowFields(docs []bson.M, spec bson.M) ([]bson.M, error) {
 	// This is intentionally a minimal, compatibility-focused implementation.
 	// Supported (common) subset:

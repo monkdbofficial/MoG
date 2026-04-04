@@ -2,6 +2,7 @@ package mongo
 
 import "testing"
 
+// TestGlobalUniqueIndexRegistry_SharedAcrossHandlers runs the corresponding test case.
 func TestGlobalUniqueIndexRegistry_SharedAcrossHandlers(t *testing.T) {
 	physical := "monkdb__idx"
 	defs := []uniqueIndexDef{{name: "uniq_name", fields: []string{"name"}}}

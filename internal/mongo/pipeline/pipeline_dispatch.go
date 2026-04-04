@@ -25,33 +25,31 @@ func applyPipeline(docs []bson.M, pipeline []bson.M) ([]bson.M, error) {
 	return applyPipelineWithLookup(docs, pipeline, nil)
 }
 
+// applyPipelineWithLookup is a helper used by the adapter.
 func applyPipelineWithLookup(docs []bson.M, pipeline []bson.M, resolve lookupResolver) ([]bson.M, error) {
+	return applyPipelineWithLookupVars(docs, pipeline, resolve, nil)
+}
+
+// applyPipelineWithLookupVars is a helper used by the adapter.
+func applyPipelineWithLookupVars(docs []bson.M, pipeline []bson.M, resolve lookupResolver, vars map[string]interface{}) ([]bson.M, error) {
 	out := docs
 	for _, stage := range pipeline {
 		switch {
 		case stage["$vectorSearch"] != nil:
-			spec, ok := coerceBsonM(stage["$vectorSearch"])
-			if !ok {
-				return nil, fmt.Errorf("$vectorSearch stage must be a document")
-			}
-			var err error
-			out, err = applyVectorSearch(out, spec)
-			if err != nil {
-				return nil, err
-			}
+			return nil, fmt.Errorf("$vectorSearch requires SQL pushdown in MoG")
 		case stage["$match"] != nil:
 			m, ok := stage["$match"].(bson.M)
 			if !ok {
 				return nil, fmt.Errorf("$match stage must be a document")
 			}
-			out = applyMatch(out, m)
+			out = applyMatchWithVars(out, m, vars)
 		case stage["$project"] != nil:
 			p, ok := stage["$project"].(bson.M)
 			if !ok {
 				return nil, fmt.Errorf("$project stage must be a document")
 			}
 			var err error
-			out, err = applyProject(out, p)
+			out, err = applyProjectWithVars(out, p, vars)
 			if err != nil {
 				return nil, err
 			}
@@ -61,7 +59,7 @@ func applyPipelineWithLookup(docs []bson.M, pipeline []bson.M, resolve lookupRes
 				return nil, fmt.Errorf("$addFields stage must be a document")
 			}
 			var err error
-			out, err = applyAddFields(out, spec)
+			out, err = applyAddFieldsWithVars(out, spec, vars)
 			if err != nil {
 				return nil, err
 			}
@@ -78,7 +76,7 @@ func applyPipelineWithLookup(docs []bson.M, pipeline []bson.M, resolve lookupRes
 				return nil, fmt.Errorf("$set stage must be a document")
 			}
 			var err error
-			out, err = applyAddFields(out, spec)
+			out, err = applyAddFieldsWithVars(out, spec, vars)
 			if err != nil {
 				return nil, err
 			}
@@ -123,7 +121,7 @@ func applyPipelineWithLookup(docs []bson.M, pipeline []bson.M, resolve lookupRes
 				return nil, fmt.Errorf("$group stage must be a document")
 			}
 			var err error
-			out, err = applyGroup(out, g)
+			out, err = applyGroupWithVars(out, g, vars)
 			if err != nil {
 				return nil, err
 			}
@@ -160,6 +158,26 @@ func applyPipelineWithLookup(docs []bson.M, pipeline []bson.M, resolve lookupRes
 				return nil, err
 			}
 			out = applySample(out, size)
+		case stage["$bucketAuto"] != nil:
+			spec, ok := coerceBsonM(stage["$bucketAuto"])
+			if !ok {
+				return nil, fmt.Errorf("$bucketAuto stage must be a document")
+			}
+			var err error
+			out, err = applyBucketAuto(out, spec)
+			if err != nil {
+				return nil, err
+			}
+		case stage["$collStats"] != nil:
+			spec, ok := coerceBsonM(stage["$collStats"])
+			if !ok {
+				return nil, fmt.Errorf("$collStats stage must be a document")
+			}
+			var err error
+			out, err = applyCollStats(spec)
+			if err != nil {
+				return nil, err
+			}
 		case stage["$facet"] != nil:
 			spec, ok := coerceBsonM(stage["$facet"])
 			if !ok {
@@ -186,19 +204,19 @@ func applyPipelineWithLookup(docs []bson.M, pipeline []bson.M, resolve lookupRes
 				return nil, fmt.Errorf("$replaceRoot stage must be a document")
 			}
 			var err error
-			out, err = applyReplaceRoot(out, spec)
+			out, err = applyReplaceRootVars(out, spec, vars)
 			if err != nil {
 				return nil, err
 			}
 		case stage["$replaceWith"] != nil:
 			var err error
-			out, err = applyReplaceWith(out, stage["$replaceWith"])
+			out, err = applyReplaceWithVars(out, stage["$replaceWith"], vars)
 			if err != nil {
 				return nil, err
 			}
 		case stage["$sortByCount"] != nil:
 			var err error
-			out, err = applySortByCount(out, stage["$sortByCount"])
+			out, err = applySortByCountVars(out, stage["$sortByCount"], vars)
 			if err != nil {
 				return nil, err
 			}

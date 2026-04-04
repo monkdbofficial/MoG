@@ -12,15 +12,16 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// TestNormalizeDocForReplyWithBlobs_InlinesMogBlobPointer runs the corresponding test case.
 func TestNormalizeDocForReplyWithBlobs_InlinesMogBlobPointer(t *testing.T) {
 	data := []byte("hello-blob")
 	sha1hex := fmt.Sprintf("%x", sha1Sum(data))
 
 	h := &Handler{
-		blobHTTPBase:      "http://blob.local",
-		blobInlineReads:   true,
+		blobHTTPBase:       "http://blob.local",
+		blobInlineReads:    true,
 		blobInlineMaxBytes: 1024,
-		blobInlineStrict:  true,
+		blobInlineStrict:   true,
 		blobHTTPTransport: roundTripperFunc(func(r *http.Request) (*http.Response, error) {
 			if r.Method != http.MethodGet {
 				return &http.Response{
@@ -73,8 +74,10 @@ func TestNormalizeDocForReplyWithBlobs_InlinesMogBlobPointer(t *testing.T) {
 
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
+// RoundTrip is a helper used by the adapter.
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
+// sha1Sum is a helper used by the adapter.
 func sha1Sum(b []byte) [20]byte {
 	return sha1.Sum(b)
 }

@@ -6,6 +6,7 @@ import (
 	"gopkg.in/mgo.v2/bson"
 )
 
+// TestUniqueIndexKeyTuples_Scalar runs the corresponding test case.
 func TestUniqueIndexKeyTuples_Scalar(t *testing.T) {
 	tuples, ok := uniqueIndexKeyTuples(bson.M{"a": 1}, []string{"a"})
 	if !ok {
@@ -16,6 +17,7 @@ func TestUniqueIndexKeyTuples_Scalar(t *testing.T) {
 	}
 }
 
+// TestUniqueIndexKeyTuples_ArraySingleField runs the corresponding test case.
 func TestUniqueIndexKeyTuples_ArraySingleField(t *testing.T) {
 	tuples, ok := uniqueIndexKeyTuples(bson.M{"a": []interface{}{"x", "y"}}, []string{"a"})
 	if !ok {
@@ -29,6 +31,7 @@ func TestUniqueIndexKeyTuples_ArraySingleField(t *testing.T) {
 	}
 }
 
+// TestUniqueIndexKeyTuples_CompoundWithArray runs the corresponding test case.
 func TestUniqueIndexKeyTuples_CompoundWithArray(t *testing.T) {
 	doc := bson.M{"a": []interface{}{1, 2}, "b": "k"}
 	tuples, ok := uniqueIndexKeyTuples(doc, []string{"a", "b"})
@@ -43,6 +46,7 @@ func TestUniqueIndexKeyTuples_CompoundWithArray(t *testing.T) {
 	}
 }
 
+// TestUniqueIndexKeyTuplesIntersect runs the corresponding test case.
 func TestUniqueIndexKeyTuplesIntersect(t *testing.T) {
 	a := [][]interface{}{{"x"}}
 	b := [][]interface{}{{"y"}, {"x"}}

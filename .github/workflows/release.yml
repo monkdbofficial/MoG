@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Build artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          TAG="${GITHUB_REF_NAME}"
+          COMMIT="$(git rev-parse --short HEAD)"
+          DATE="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          LDFLAGS="-s -w -X mog/internal/version.Version=${TAG} -X mog/internal/version.Commit=${COMMIT} -X mog/internal/version.BuildDate=${DATE}"
+
+          cat > dist/BUILD_INFO.txt <<EOF
+          version=${TAG}
+          commit=${COMMIT}
+          build_date=${DATE}
+          go_version=$(go version)
+          EOF
+
+          build_one () {
+            local goos="$1"
+            local goarch="$2"
+            local goarm="${3:-}"
+            local ext=""
+            if [[ "${goos}" == "windows" ]]; then
+              ext=".exe"
+            fi
+
+            local suffix="${goos}_${goarch}"
+            if [[ -n "${goarm}" ]]; then
+              suffix="${suffix}v${goarm}"
+            fi
+            local base="mog_${TAG}_${suffix}"
+            local out="dist/${base}${ext}"
+            echo "Building ${out}"
+            GOOS="${goos}" GOARCH="${goarch}" GOARM="${goarm}" CGO_ENABLED=0 go build -trimpath -ldflags "${LDFLAGS}" -o "${out}" ./cmd/mog
+
+            if [[ "${goos}" == "windows" ]]; then
+              (cd dist && zip -q "${base}.zip" "${base}${ext}" BUILD_INFO.txt)
+              rm -f "${out}"
+            else
+              (cd dist && tar -czf "${base}.tar.gz" "${base}${ext}" BUILD_INFO.txt)
+              rm -f "${out}"
+            fi
+          }
+
+          build_one linux amd64
+          build_one linux arm64
+          build_one linux 386
+          build_one linux arm 6
+          build_one linux arm 7
+          build_one darwin amd64
+          build_one darwin arm64
+          build_one windows amd64
+          build_one windows arm64
+          build_one windows 386
+          build_one freebsd amd64
+          build_one freebsd arm64
+
+          (cd dist && sha256sum * > SHA256SUMS)
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/*
+          generate_release_notes: true

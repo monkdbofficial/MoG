@@ -171,4 +171,3 @@ func ArrayArgForSQLType(v interface{}, sqlType string) (interface{}, error) {
 		return nil, fmt.Errorf("unsupported array element type: %s", elemType)
 	}
 }
-

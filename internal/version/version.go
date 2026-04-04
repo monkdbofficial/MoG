@@ -19,6 +19,7 @@ var (
 	BuildDate = "unknown"
 )
 
+// Info is a helper used by the adapter.
 func Info() string {
 	commit := Commit
 	if commit == "" {

@@ -100,6 +100,7 @@ nav:
   - Performance: performance.md
   - Deployment: deployment.md
   - Limitations: limitations.md
+  - Releasing: releasing.md
 
 markdown_extensions:
   - admonition

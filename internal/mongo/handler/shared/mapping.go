@@ -5,6 +5,7 @@ import (
 	"strings"
 )
 
+// IsSafeIdentifier reports whether a condition holds.
 func IsSafeIdentifier(name string) bool {
 	if name == "" {
 		return false
@@ -21,8 +22,28 @@ func IsSafeIdentifier(name string) bool {
 	return true
 }
 
+// IsInternalCollectionName reports whether name is an internal, system-managed
+// collection that should not be surfaced to clients (Compass/mongosh).
+//
+// These may be created as implementation details (e.g. $graphLookup helpers).
+func IsInternalCollectionName(name string) bool {
+	if name == "" {
+		return false
+	}
+	// $graphLookup helper tables are stored in the doc schema and can otherwise
+	// show up as user collections when we derive catalog state from tables.
+	if strings.Contains(name, "__graph_edges__") {
+		return true
+	}
+	if strings.Contains(name, "__graph_vertices__") {
+		return true
+	}
+	return false
+}
+
 var FieldB32 = base32.StdEncoding.WithPadding(base32.NoPadding)
 
+// SQLColumnNameForField is a helper used by the adapter.
 func SQLColumnNameForField(field string) string {
 	// NOTE: MongoDB field names can't contain '.' (nested paths are expressed in queries), but they can
 	// start with '_' which conflicts with MonkDB system column patterns. We also reserve a few
@@ -44,8 +65,16 @@ func SQLColumnNameForField(field string) string {
 	return "f_" + enc
 }
 
+// MongoFieldNameForColumn is a helper used by the adapter.
 func MongoFieldNameForColumn(col string) string {
 	if col == "" {
+		return ""
+	}
+	// CrateDB-style "object sub-columns" show up in information_schema and SELECT *
+	// result sets as column names like `meta['path']` or `data['ts']['$date']`.
+	// These are not real MongoDB field names and should never be surfaced back to
+	// clients (Compass/mongosh), otherwise documents look duplicated/noisy.
+	if strings.Contains(col, "['") {
 		return ""
 	}
 	if col == "id" {

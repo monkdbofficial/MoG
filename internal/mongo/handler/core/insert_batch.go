@@ -19,6 +19,7 @@ type insertPreparedDoc struct {
 	docID string
 }
 
+// insertMany is a helper used by the adapter.
 func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []interface{}) (seen int, inserted int64, err error) {
 	if h.pool == nil {
 		return 0, 0, fmt.Errorf("database pool is not configured")
@@ -86,7 +87,7 @@ func (h *Handler) insertMany(ctx context.Context, physical string, rawDocs []int
 
 	// Ensure table exists and columns exist. Use a local cache for table/column existence
 	// to avoid repeated DDL checks even if they are "IF NOT EXISTS".
-	if err := h.ensureCollectionTable(ctx, physical); err != nil {
+	if err := h.ensureCollectionTableWithColumnsExec(ctx, h.db(), physical, colTypes); err != nil {
 		return seen, inserted, err
 	}
 

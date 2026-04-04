@@ -2,25 +2,39 @@ package opmsg
 
 import (
 	"context"
+	"time"
 
 	"go.uber.org/zap"
 	"gopkg.in/mgo.v2/bson"
 
 	"mog/internal/logging"
+	mongopath "mog/internal/mongo"
 	"mog/internal/mongo/handler/relational"
 	"mog/internal/mongo/handler/shared"
 	mpipeline "mog/internal/mongo/pipeline"
 )
 
+// CmdCount is a helper used by the adapter.
 func CmdCount(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]byte, bool, error) {
 	col, ok := cmd["count"].(string)
 	if !ok {
 		return nil, false, nil
 	}
+	start := time.Now()
 
 	dbName := deps.CommandDB(cmd)
 	physical, err := deps.PhysicalCollectionName(dbName, col)
 	if err != nil {
+		mongopath.LogQuery(mongopath.QueryLogOptions{
+			Stage:         mongopath.RequestStageComplete,
+			Method:        "count",
+			Operation:     "count",
+			QueryName:     "count",
+			Table:         "",
+			Error:         err,
+			TotalDuration: time.Since(start),
+			StartedAt:     start,
+		})
 		resp, rerr := deps.NewMsgError(requestID, 2, "BadValue", err.Error())
 		return resp, true, rerr
 	}
@@ -40,6 +54,16 @@ func CmdCount(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]by
 			if deps.IsUndefinedRelation(err) || deps.IsUndefinedSchema(err) {
 				n = 0
 			} else {
+				mongopath.LogQuery(mongopath.QueryLogOptions{
+					Stage:         mongopath.RequestStageComplete,
+					Method:        "count",
+					Operation:     "count",
+					QueryName:     "count",
+					Table:         physical,
+					Error:         err,
+					TotalDuration: time.Since(start),
+					StartedAt:     start,
+				})
 				return nil, true, err
 			}
 		}
@@ -54,6 +78,16 @@ func CmdCount(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]by
 		if len(pushdownQuery) > 0 {
 			where, ok, err := relational.BuildWhere(pushdownQuery)
 			if err != nil {
+				mongopath.LogQuery(mongopath.QueryLogOptions{
+					Stage:         mongopath.RequestStageComplete,
+					Method:        "count",
+					Operation:     "count",
+					QueryName:     "count",
+					Table:         physical,
+					Error:         err,
+					TotalDuration: time.Since(start),
+					StartedAt:     start,
+				})
 				return nil, true, err
 			}
 			if ok && where != nil && where.SQL != "" {
@@ -78,6 +112,16 @@ func CmdCount(deps Deps, ctx context.Context, requestID int32, cmd bson.M) ([]by
 		}
 		baseDocs, err := deps.LoadSQLDocs(ctx, physical)
 		if err != nil {
+			mongopath.LogQuery(mongopath.QueryLogOptions{
+				Stage:         mongopath.RequestStageComplete,
+				Method:        "count",
+				Operation:     "count",
+				QueryName:     "count",
+				Table:         physical,
+				Error:         err,
+				TotalDuration: time.Since(start),
+				StartedAt:     start,
+			})
 			return nil, true, err
 		}
 		baseDocs = mpipeline.ApplyMatch(baseDocs, query)
@@ -89,5 +133,16 @@ countDone:
 		logging.Logger().Debug("count result", zap.String("db", dbName), zap.String("coll", col), zap.String("physical", physical), zap.Int64("n", n))
 	}
 	resp, err := deps.NewMsg(requestID, bson.M{"n": n, "ok": 1.0})
+	mongopath.LogQuery(mongopath.QueryLogOptions{
+		Stage:         mongopath.RequestStageComplete,
+		Method:        "count",
+		Operation:     "count",
+		QueryName:     "count",
+		Table:         physical,
+		RowsAffected:  n,
+		Error:         err,
+		TotalDuration: time.Since(start),
+		StartedAt:     start,
+	})
 	return resp, true, err
 }
